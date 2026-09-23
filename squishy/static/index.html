@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Squishy McSquishface</title>
+<style>
+  :root {
+    --bg: #14161a; --card: #1e2127; --card-hi: #262a31; --line: #2e333b;
+    --text: #e8e6e3; --muted: #8a8f98; --accent: #ff7a59; --accent-dim: #ff7a5926;
+    --ok: #4cc38a; --err: #e5484d; --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 32px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .num { font-variant-numeric: tabular-nums; }
+  button { font: inherit; cursor: pointer; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--card-hi); color: var(--text); padding: 9px 16px; }
+  button:hover:not(:disabled) { border-color: var(--muted); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #1a0f0b; font-weight: 600; }
+  button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+
+  #drop { border: 2px dashed var(--line); border-radius: var(--radius); background: var(--card);
+    padding: 72px 24px; text-align: center; cursor: pointer; transition: border-color .15s, background .15s; }
+  #drop.compact { padding: 14px 20px; text-align: left; display: flex; align-items: center; gap: 12px; }
+  #drop.hover { border-color: var(--accent); background: var(--accent-dim); }
+  #drop .big { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+  #drop.compact .big { font-size: 15px; margin: 0; }
+  #drop .hint { color: var(--muted); }
+  #drop.compact .hint { margin-left: auto; }
+
+  .panel { margin-top: 20px; }
+  .hidden { display: none !important; }
+  .source { display: flex; flex-wrap: wrap; gap: 6px 20px; color: var(--muted); }
+  .source strong { color: var(--text); font-weight: 600; word-break: break-all; }
+
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 10px 0 6px; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 16px; }
+  .card { background: var(--card); border: 2px solid transparent; border-radius: var(--radius);
+    padding: 16px; cursor: pointer; text-align: left; transition: border-color .12s, background .12s; }
+  .card:hover { background: var(--card-hi); }
+  .card.selected { border-color: var(--accent); }
+  .card .label { font-weight: 600; }
+  .card .size { font-size: 28px; font-weight: 700; margin: 6px 0 0; letter-spacing: -0.02em; }
+  .card .size small { font-size: 14px; color: var(--muted); font-weight: 500; }
+  .card .ratio { color: var(--muted); font-size: 13px; }
+  .card .spec { color: var(--muted); font-size: 13px; margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+  .card .warn { color: var(--accent); font-size: 12px; margin-top: 6px; }
+  .card .done { color: var(--ok); font-size: 13px; margin-top: 6px; font-weight: 600; }
+
+  .actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+  .status { background: var(--card); border-radius: var(--radius); padding: 16px 18px; margin-top: 16px; }
+  .status .row { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+  .status .headline { font-size: 18px; font-weight: 600; }
+  .status .meta { color: var(--muted); }
+  .status.ok { border-left: 4px solid var(--ok); }
+  .status.err { border-left: 4px solid var(--err); }
+  .status .errtext { color: var(--err); white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; font-size: 12px; margin-top: 8px; }
+  footer { color: var(--muted); font-size: 13px; margin-top: 36px; }
+  footer code { color: var(--text); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Squishy <span>McSquishface</span></h1>
+  <p class="sub">Drop a video. See how small it can get. Squish it.</p>
+
+  <div id="drop" tabindex="0" role="button" aria-label="Drop a video or click to choose">
+    <div class="big" id="dropBig">Drop a video here</div>
+    <div class="hint" id="dropHint">or click to choose a file</div>
+    <input type="file" id="picker" accept="video/*" hidden>
+  </div>
+
+  <section id="uploading" class="panel hidden">
+    <div class="meta" id="upText">Loading...</div>
+    <div class="bar"><div id="upBar"></div></div>
+  </section>
+
+  <section id="loaded" class="panel hidden">
+    <div class="source" id="source"></div>
+    <div class="cards" id="cards"></div>
+    <div class="actions">
+      <button class="primary" id="go" disabled>Squish it</button>
+      <span class="meta" id="goHint" style="color:var(--muted)">Pick a compression level</span>
+    </div>
+    <div class="status hidden" id="status"></div>
+  </section>
+
+  <footer>
+    Sizes are ceilings: the result lands at or under the estimate. MB here = what Windows Explorer shows.<br>
+    Output folder: <code id="outDir">-</code> &middot; Close the Squishy console window to quit.
+  </footer>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const MIB = 1024 * 1024;
+  const state = { source: null, plans: [], selected: null, job: null, poll: null, results: {} };
+
+  const fmtMB = (b) => (b < 0.05 * MIB ? "<0.1" : (b / MIB).toFixed(1));
+  const fmtTime = (s) => {
+    s = Math.max(0, Math.round(s));
+    const m = Math.floor(s / 60), r = s % 60;
+    return m ? `${m}m ${String(r).padStart(2, "0")}s` : `${r}s`;
+  };
+  const el = (tag, cls, text) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
+  const busy = () => state.job && ["queued", "running"].includes(state.job.state);
+
+  // ---- drop / pick -------------------------------------------------------
+  const drop = $("drop");
+  ["dragenter", "dragover"].forEach((ev) => window.addEventListener(ev, (e) => {
+    e.preventDefault();
+    if (!busy()) drop.classList.add("hover");
+  }));
+  ["dragleave", "drop"].forEach((ev) => window.addEventListener(ev, (e) => {
+    e.preventDefault();
+    if (ev === "dragleave" && e.relatedTarget) return;
+    drop.classList.remove("hover");
+  }));
+  window.addEventListener("drop", (e) => {
+    const f = e.dataTransfer && e.dataTransfer.files[0];
+    if (f) upload(f);
+  });
+  drop.addEventListener("click", () => { if (!busy()) $("picker").click(); });
+  drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") $("picker").click(); });
+  $("picker").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (f) upload(f);
+  });
+
+  function upload(file) {
+    if (busy()) return showStatus("err", "An encode is running", "Wait for it to finish or cancel it first.");
+    $("loaded").classList.add("hidden");
+    $("uploading").classList.remove("hidden");
+    $("upBar").style.width = "0%";
+    $("upText").textContent = `Loading ${file.name} (${fmtMB(file.size)} MB)...`;
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload");
+    xhr.setRequestHeader("X-Filename", encodeURIComponent(file.name));
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable) return;
+      const pct = (100 * e.loaded) / e.total;
+      $("upBar").style.width = pct + "%";
+      if (pct >= 100) $("upText").textContent = `Analysing ${file.name}...`;
+    };
+    xhr.onload = () => {
+      $("uploading").classList.add("hidden");
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch (_) {}
+      if (xhr.status !== 200) {
+        $("loaded").classList.remove("hidden");
+        $("cards").replaceChildren(); $("source").replaceChildren();
+        return showStatus("err", "Could not read that file", data.error || `HTTP ${xhr.status}`);
+      }
+      loaded(data);
+    };
+    xhr.onerror = () => {
+      $("uploading").classList.add("hidden");
+      $("loaded").classList.remove("hidden");
+      showStatus("err", "Upload failed", "Is the Squishy console window still open?");
+    };
+    xhr.send(file);
+  }
+
+  // ---- source + cards ----------------------------------------------------
+  function loaded(data) {
+    state.source = data.source;
+    state.plans = data.plans;
+    state.selected = state.selected && data.plans.some((p) => p.preset_id === state.selected) ? state.selected : "medium";
+    state.results = {};
+    state.job = null;
+    $("outDir").textContent = data.out_dir;
+
+    drop.classList.add("compact");
+    $("dropBig").textContent = "Drop another video";
+    $("dropHint").textContent = "or click to choose";
+
+    const s = data.source;
+    const src = $("source");
+    src.replaceChildren();
+    const name = el("strong", "", s.name);
+    src.append(name,
+      el("span", "num", `${fmtMB(s.size_bytes)} MB`),
+      el("span", "num", fmtTime(s.duration_s)),
+      el("span", "num", `${s.width}x${s.height}`),
+      el("span", "num", `${Math.round(s.fps * 100) / 100} fps`),
+      el("span", "", s.has_audio ? "with audio" : "no audio"));
+
+    $("status").classList.add("hidden");
+    $("loaded").classList.remove("hidden");
+    renderCards();
+  }
+
+  function renderCards() {
+    const wrap = $("cards");
+    wrap.replaceChildren();
+    for (const p of state.plans) {
+      const c = el("button", "card" + (p.preset_id === state.selected ? " selected" : ""));
+      c.type = "button";
+      c.disabled = busy();
+      c.addEventListener("click", () => { state.selected = p.preset_id; renderCards(); });
+      c.append(el("div", "label", p.label));
+      const size = el("div", "size num");
+      size.append(el("small", "", "up to "), document.createTextNode(fmtMB(p.est_bytes) + " "), el("small", "", "MB"));
+      c.append(size);
+      const pct = Math.round(p.est_ratio * 100);
+      c.append(el("div", "ratio num", pct >= 1 ? `~${pct}% of original` : "<1% of original"));
+      const audio = p.audio_kbps ? ` + ${p.audio_kbps}k audio` : "";
+      const spec = el("div", "spec num");
+      spec.append(el("div", "", `${p.out_width}x${p.out_height} @ ${Math.round(p.out_fps * 100) / 100} fps`),
+        el("div", "", `${p.video_kbps / 1000} Mbps video${audio}`));
+      c.append(spec);
+      if (p.bitrate_capped) c.append(el("div", "warn", "Capped at the source's own bitrate"));
+      if (p.est_bytes >= state.source.size_bytes) c.append(el("div", "warn", "May not be smaller than the original"));
+      const r = state.results[p.preset_id];
+      if (r) c.append(el("div", "done num", `Done: ${fmtMB(r)} MB`));
+      wrap.append(c);
+    }
+    $("go").disabled = busy() || !state.selected;
+    $("goHint").textContent = state.selected ? "" : "Pick a compression level";
+  }
+
+  // ---- encode ------------------------------------------------------------
+  $("go").addEventListener("click", async () => {
+    if (busy() || !state.selected) return;
+    const res = await api("POST", "/api/encode", { file_id: state.source.file_id, preset_id: state.selected });
+    if (!res.ok) return showStatus("err", "Could not start", res.data.error);
+    state.job = res.data;
+    renderCards();
+    renderJob();
+    state.poll = setInterval(pollJob, 500);
+  });
+
+  async function pollJob() {
+    const res = await api("GET", `/api/job/${state.job.job_id}`);
+    if (!res.ok) { clearInterval(state.poll); return showStatus("err", "Lost track of the job", res.data.error); }
+    state.job = res.data;
+    if (!busy()) {
+      clearInterval(state.poll);
+      if (state.job.state === "done") state.results[state.job.preset_id] = state.job.output_bytes;
+      renderCards();
+    }
+    renderJob();
+  }
+
+  function renderJob() {
+    const j = state.job;
+    const plan = state.plans.find((p) => p.preset_id === j.preset_id);
+    const box = $("status");
+    box.className = "status";
+    box.replaceChildren();
+
+    if (j.state === "queued" || j.state === "running") {
+      const row = el("div", "row");
+      row.append(el("div", "headline num", `Squishing (${plan.label})... ${j.percent.toFixed(0)}%`));
+      let eta = "";
+      if (j.elapsed_s && j.percent > 2) eta = ` · ~${fmtTime(j.elapsed_s * (100 - j.percent) / j.percent)} left`;
+      row.append(el("div", "meta num", `${fmtTime(j.elapsed_s || 0)} elapsed${eta}`));
+      const bar = el("div", "bar"); const fill = el("div"); fill.style.width = j.percent + "%"; bar.append(fill);
+      const cancel = el("button", "", "Cancel");
+      cancel.addEventListener("click", () => api("POST", `/api/job/${j.job_id}/cancel`));
+      box.append(row, bar, cancel);
+    } else if (j.state === "done") {
+      box.classList.add("ok");
+      const reduction = 100 * (1 - j.output_bytes / state.source.size_bytes);
+      const change = reduction >= 0.5 ? `${reduction.toFixed(reduction > 99 ? 1 : 0)}% smaller`
+        : reduction <= -0.5 ? `${(-reduction).toFixed(0)}% larger` : "about the same size";
+      const row = el("div", "row");
+      row.append(el("div", "headline num", `${fmtMB(j.output_bytes)} MB`),
+        el("div", "meta num", `was ${fmtMB(state.source.size_bytes)} MB · ${change} · estimate was ${fmtMB(j.est_bytes)} MB · took ${fmtTime(j.elapsed_s)}`));
+      const acts = el("div", "actions");
+      const reveal = el("button", "primary", "Open folder");
+      reveal.addEventListener("click", () => api("POST", `/api/job/${j.job_id}/reveal`));
+      const dl = el("a"); dl.href = `/api/job/${j.job_id}/download`;
+      dl.append(el("button", "", "Download"));
+      acts.append(reveal, dl, el("span", "meta", j.output_name));
+      box.append(row, acts);
+    } else if (j.state === "cancelled") {
+      box.append(el("div", "headline", "Cancelled"), el("div", "meta", "Partial file deleted."));
+    } else {
+      box.classList.add("err");
+      box.append(el("div", "headline", "Encode failed"), el("div", "errtext", j.error || "unknown error"));
+    }
+    box.classList.remove("hidden");
+  }
+
+  function showStatus(kind, title, detail) {
+    const box = $("status");
+    box.className = "status " + (kind === "err" ? "err" : "ok");
+    box.replaceChildren(el("div", "headline", title), el("div", kind === "err" ? "errtext" : "meta", detail || ""));
+  }
+
+  async function api(method, url, body) {
+    try {
+      const r = await fetch(url, {
+        method,
+        headers: body ? { "Content-Type": "application/json" } : {},
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      let data = {};
+      try { data = await r.json(); } catch (_) {}
+      return { ok: r.ok, data };
+    } catch (e) {
+      return { ok: false, data: { error: "Server not reachable. Is the Squishy console window still open?" } };
+    }
+  }
+})();
+</script>
+</body>
+</html>
