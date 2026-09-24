@@ -17,5 +17,8 @@ if not defined PY (
     exit /b 1
 )
 
+rem pause resets ERRORLEVEL, so keep launch.py's code for whoever ran us (an agent, a script).
 %PY% launch.py %*
-if errorlevel 1 pause
+set "RC=%ERRORLEVEL%"
+if not "%RC%"=="0" pause
+exit /b %RC%

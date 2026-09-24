@@ -23,6 +23,7 @@ import threading
 import urllib.request
 import webbrowser
 from pathlib import Path
+from typing import TextIO
 
 from squishy.server import AppState, SquishyServer
 from squishy.tools import (BIN_DIR, FFMPEG_BYTES, FFMPEG_VERSION, DownloadError, Tools,
@@ -44,15 +45,48 @@ def already_running(port: int) -> bool:
         return False
 
 
-def print_progress(done: int, total: int | None) -> None:
-    """Render download progress on one console line (ASCII only)."""
-    mib = 1024 * 1024
-    if total:
-        line = f"  {done / mib:6.1f} / {total / mib:.1f} MB  ({100 * done / total:3.0f}%)"
-    else:
-        line = f"  {done / mib:6.1f} MB"
-    end = "\n" if total and done >= total else ""
-    print(f"\r{line}", end=end, flush=True)
+class ProgressLine:
+    """Download progress redrawn in place on one console line (ASCII only).
+
+    The line stays open (no newline) while it is being redrawn, so anything else
+    printed must call close() first; ConsoleHandler does that for log records.
+    """
+
+    def __init__(self, stream: TextIO | None = None) -> None:
+        self._stream = stream
+        self.open = False
+
+    def __call__(self, done: int, total: int | None) -> None:
+        mib = 1024 * 1024
+        if total:
+            line = f"  {done / mib:6.1f} / {total / mib:.1f} MB  ({100 * done / total:3.0f}%)"
+        else:
+            line = f"  {done / mib:6.1f} MB"
+        finished = bool(total) and done >= total
+        print(f"\r{line}", end="\n" if finished else "", file=self._stream or sys.stdout,
+              flush=True)
+        self.open = not finished
+
+    def close(self) -> None:
+        """End an open progress line so the next output starts on a fresh one."""
+        if self.open:
+            print(file=self._stream or sys.stdout, flush=True)
+            self.open = False
+
+
+PROGRESS = ProgressLine()
+
+
+class ConsoleHandler(logging.StreamHandler):
+    """Log handler that never writes onto the end of an open progress line."""
+
+    def __init__(self, progress: ProgressLine = PROGRESS, stream: TextIO | None = None) -> None:
+        super().__init__(stream)
+        self._progress = progress
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self._progress.close()
+        super().emit(record)
 
 
 def fetch_ffmpeg() -> Tools | None:
@@ -62,9 +96,8 @@ def fetch_ffmpeg() -> Tools | None:
         Tools on success, None on failure.
     """
     try:
-        return download_tools(progress=print_progress)
+        return download_tools(progress=PROGRESS)
     except DownloadError as exc:
-        print()
         log.error("ffmpeg download failed: %s", exc)
         log.error("Try again, or install ffmpeg yourself (see README.md).")
         return None
@@ -94,7 +127,7 @@ def resolve_tools() -> Tools | None:
     try:
         answer = input("Download it now? [Y/n] ").strip().lower()
     except EOFError:  # no console to ask (e.g. an agent ran us); don't hang, don't assume yes
-        print()
+        print(flush=True)  # piped stdout is buffered; the error below goes to stderr
         answer = "n"
     if answer not in ("", "y", "yes"):
         log.error("No ffmpeg, no squishing. Run 'python launch.py --get-ffmpeg', "
@@ -121,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
-                        datefmt="%H:%M:%S")
+                        datefmt="%H:%M:%S", handlers=[ConsoleHandler()])
 
     if args.get_ffmpeg:
         if not download_supported():
