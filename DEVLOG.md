@@ -60,8 +60,14 @@ plus 2 opt-in live download tests, one per source (`SQUISHY_LIVE_DOWNLOAD=1`).
   the progress counter. The download still falls back correctly.
 - A clean machine, and Mark-of-the-Web/SmartScreen behaviour on a `.bat` from a downloaded zip.
 - The v0.1 items are still open: real double-click, Open folder, real OS drag-and-drop.
-- **The repo is private.** Friends can't see Releases until it's public or they're added as
-  collaborators.
+
+### Shipped
+
+- Scrubbed the machine-specific details (an absolute `C:\Users\...` path in the spec, and a note
+  about another local tool's port) out of **all** history with filter-branch, then made the repo
+  public and released **v0.2.0**. Known residue, accepted: GitHub still serves the pre-rewrite
+  commits by exact SHA until it garbage-collects them. Nothing links to them.
+- Machine-specific notes now live in `CLAUDE.local.md` (gitignored). Keep them out of tracked docs.
 
 ---
 
