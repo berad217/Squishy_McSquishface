@@ -1,5 +1,35 @@
 # Release notes
 
+## v0.2.1 - "Tidying Up After Itself"
+
+No new features. v0.2 got shipped, then it got audited, and the audit found a few places
+where Squishy left a mess when something went wrong. It doesn't now.
+
+### Fixed
+
+- **Closing the window now actually stops the squishing.** Before, closing the console
+  mid-encode left ffmpeg running invisibly in the background, using your CPU until it
+  finished a video nobody was waiting for. Now Windows itself kills ffmpeg when Squishy
+  goes, however Squishy goes.
+- **"Port busy" is noticed even when the other program is polite about it.** If another
+  local server was already on Squishy's port, v0.2 could move in alongside it and both
+  would answer. Now it notices and uses a free port instead.
+- **A hiccup no longer freezes the page.** One failed status check used to lock every button
+  until you reloaded. Now a brief blip is retried; a real failure says so and hands you
+  the controls back.
+- **Output folder you can't write to?** You now get told that, instead of "Server not
+  reachable", which was a lie.
+- **`Squishy.bat` reports failure as failure.** It used to exit 0 after an error, which
+  only mattered to scripts and AI agents, but they were being misled.
+- **Download progress stays on its own line.** Warnings no longer print on top of the progress counter.
+
+### Getting it
+
+Same as before: download **Source code (zip)** below, unzip, and double-click `Squishy.bat`.
+Upgrading from v0.2.0? Copy your old `bin` folder into the new one to skip re-downloading ffmpeg.
+
+---
+
 ## v0.2.0 - "Now With Fewer Prerequisites"
 
 v0.1 worked perfectly on exactly one machine, and that machine happened to have ffmpeg

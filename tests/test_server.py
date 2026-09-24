@@ -1,6 +1,8 @@
 import http.client
 import json
+import os
 import shutil
+import socket
 import threading
 import time
 import urllib.parse
@@ -114,3 +116,32 @@ def test_upload_encode_download_roundtrip(server, tmp_path):
 def test_unknown_job_404(server):
     assert _req(server, "GET", "/api/job/nope")[0] == 404
     assert _req(server, "POST", "/api/job/nope/cancel")[0] == 404
+
+
+def test_unwritable_output_folder_is_a_500_not_a_dropped_connection(server, tmp_path, monkeypatch):
+    from squishy import server as server_mod
+    from squishy.presets import SourceInfo
+    from squishy.server import Upload
+
+    info = SourceInfo("f1", "clip.mp4", 1000, 2.0, 640, 360, 30.0, False)
+    server.app.uploads["f1"] = Upload(tmp_path / "clip.mp4", info)
+    # out_dir exists, but the reserved output name can't be created (read-only / CFA / MAX_PATH)
+    monkeypatch.setattr(server_mod, "unique_path", lambda *a: tmp_path / "missing" / "x.mp4")
+    status, data = _req(server, "POST", "/api/encode", body={"file_id": "f1", "preset_id": "heavy"})
+    assert status == 500
+    assert "cannot write to output folder" in json.loads(data)["error"]
+    assert not server.app.jobs
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows SO_REUSEADDR semantics")
+def test_busy_port_is_refused_even_if_owner_allows_reuse(tmp_path):
+    squatter = socket.socket()
+    squatter.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # as Python servers do
+    squatter.bind(("127.0.0.1", 0))
+    squatter.listen()
+    try:
+        app = AppState(temp_dir=tmp_path, out_dir=tmp_path)
+        with pytest.raises(OSError):  # launch.py then falls back to a free port
+            SquishyServer(("127.0.0.1", squatter.getsockname()[1]), app)
+    finally:
+        squatter.close()

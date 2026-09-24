@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import secrets
 import shutil
+import socket
 import subprocess
 import threading
 import urllib.parse
@@ -101,6 +103,16 @@ class SquishyServer(ThreadingHTTPServer):
     """ThreadingHTTPServer carrying the shared AppState."""
 
     daemon_threads = True
+    # On Windows SO_REUSEADDR lets us bind a port another process is already listening
+    # on (if it set the flag too, as Python servers do), so the busy-port fallback never
+    # fires. Exclusive use makes that bind fail instead.
+    allow_reuse_address = os.name != "nt"
+
+    def server_bind(self) -> None:
+        """Bind, claiming the port exclusively on Windows."""
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
     def __init__(self, address: tuple[str, int], app: AppState) -> None:
         """Bind the server.
@@ -288,10 +300,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error(HTTPStatus.CONFLICT, "an encode is already running")
             try:
                 self.app.out_dir.mkdir(parents=True, exist_ok=True)
+                dst = unique_path(self.app.out_dir, f"{safe_stem(upload.info.name)}_{preset.id}", ".mp4")
+                dst.touch()  # reserve the name so a quick second job can't pick it
             except OSError as exc:
-                return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, f"cannot create output folder: {exc}")
-            dst = unique_path(self.app.out_dir, f"{safe_stem(upload.info.name)}_{preset.id}", ".mp4")
-            dst.touch()  # reserve the name so a quick second job can't pick it
+                log.error("Cannot write to output folder %s: %s", self.app.out_dir, exc)
+                return self._error(HTTPStatus.INTERNAL_SERVER_ERROR,
+                                   f"cannot write to output folder {self.app.out_dir}: {exc}")
             job = EncodeJob(secrets.token_hex(4), upload.path, dst, plan_for(upload.info, preset),
                             upload.info.duration_s, ffmpeg=self.app.ffmpeg)
             self.app.jobs[job.job_id] = job

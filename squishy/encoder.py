@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import collections
+import ctypes
 import logging
+import os
 import subprocess
 import threading
 import time
@@ -17,6 +19,78 @@ NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 X264_PRESET = "slow"
 X264_CRF = 23
+
+_job: tuple | None = None  # (kernel32, job handle), or () if unavailable
+_job_lock = threading.Lock()
+
+
+def _kill_on_exit_job() -> tuple:
+    """Return (kernel32, handle) for this process's kill-on-close Win32 Job Object.
+
+    Every process assigned to the job is killed by the kernel when its last handle
+    closes, which happens when this process dies for any reason (console closed,
+    taskkill /F, crash) - cases where no Python cleanup runs. The handle is
+    deliberately never closed. Created on first use; () off Windows or on failure.
+    """
+    global _job
+    with _job_lock:
+        if _job is not None:
+            return _job
+        _job = ()
+        if os.name != "nt":
+            return _job
+        from ctypes import wintypes
+
+        class BasicLimits(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64),
+                        ("PerJobUserTimeLimit", ctypes.c_int64),
+                        ("LimitFlags", wintypes.DWORD),
+                        ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t),
+                        ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_size_t),
+                        ("PriorityClass", wintypes.DWORD),
+                        ("SchedulingClass", wintypes.DWORD)]
+
+        class ExtendedLimits(ctypes.Structure):
+            _fields_ = [("BasicLimitInformation", BasicLimits),
+                        ("IoInfo", ctypes.c_uint64 * 6),
+                        ("ProcessMemoryLimit", ctypes.c_size_t),
+                        ("JobMemoryLimit", ctypes.c_size_t),
+                        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        k32.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+        k32.SetInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int,
+                                                wintypes.LPVOID, wintypes.DWORD)
+        k32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+
+        limits = ExtendedLimits()
+        limits.BasicLimitInformation.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+        job = k32.CreateJobObjectW(None, None)
+        if job and k32.SetInformationJobObject(job, 9,  # JobObjectExtendedLimitInformation
+                                               ctypes.byref(limits), ctypes.sizeof(limits)):
+            _job = (k32, job)
+        else:
+            log.warning("No kill-on-exit job object (error %d); ffmpeg may outlive a closed "
+                        "console", ctypes.get_last_error())
+        return _job
+
+
+def kill_with_this_process(proc: subprocess.Popen) -> None:
+    """Make the kernel kill proc if this process dies first. Best effort; Windows only.
+
+    Args:
+        proc: A freshly started child process.
+    """
+    job = _kill_on_exit_job()
+    if job:
+        k32, handle = job
+        if not k32.AssignProcessToJobObject(handle, int(proc._handle)):  # noqa: SLF001
+            log.warning("Could not tie pid %d to Squishy's lifetime (error %d)",
+                        proc.pid, ctypes.get_last_error())
 
 
 def build_ffmpeg_args(src: Path, dst: Path, plan: Plan, ffmpeg: str = "ffmpeg") -> list[str]:
@@ -188,6 +262,9 @@ class EncodeJob:
                     stdin=subprocess.DEVNULL,
                     creationflags=NO_WINDOW,
                 )
+                # CREATE_NO_WINDOW gives ffmpeg its own hidden console, so closing ours
+                # would not stop it; the job object does.
+                kill_with_this_process(self._proc)
             drain = threading.Thread(target=self._drain_stderr, args=(self._proc.stderr,), daemon=True)
             drain.start()
             for raw in self._proc.stdout:

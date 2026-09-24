@@ -4,6 +4,70 @@ Newest entries first. Decisions, rationale, and measured results; not a changelo
 
 ---
 
+## 2026-09-24 - v0.2.1: release smoke test, console fixes, robustness audit
+
+Headless follow-up (user on phone). 59 tests pass: +4 `test_launch.py`, +1 `test_lifetime.py`, +2 `test_server.py`.
+
+### Fixed
+
+- **Log lines no longer land on the download progress line.** Root cause was wider than
+  the v0.2 note: *any* log record while the `\r` line was open, including the success line
+  when a server sends no Content-Length. `ProgressLine` tracks whether its line is open
+  and `ConsoleHandler` closes it before emitting, so the fix is in one place, not at each call.
+- **`Squishy.bat` now returns launch.py's exit code.** `pause` resets ERRORLEVEL, so an
+  agent running the .bat got 0 after a failure. It now saves the code, pauses, then `exit /b`s with it.
+- **EOF-at-prompt newline is flushed.** With piped output the ERROR landed on the prompt line.
+
+### Verified (release zip, as a friend gets it)
+
+`git archive v0.2.0` (the same way GitHub builds its "Source code" zip) -> 28 files, no `bin/`,
+`.bat` all CRLF. Extracted to scratch, run from another folder, ffmpeg removed from PATH:
+
+- No console: prompt -> EOF -> "No ffmpeg" pointer, no hang. Python 3.7/3.8/3.10 get the
+  one-line version message, not a traceback.
+- `Squishy.bat --get-ffmpeg`: pinned download 7 s, hash OK, ffmpeg 9.0.2 in the copy's `bin/`.
+- HTTP drive of a 1080x1920 clip with audio, named `Beach day été (1).mp4`: all four presets
+  done, actual/ceiling 0.54-0.81, portrait preserved (Heavy 720x1280), UTF-8 download name correct.
+  Cancel leaves no partial output. Junk upload gets 422 and temp is clean. Foreign Host / cross-origin POST get 403.
+
+### Fixed from the audit (items 1-4; each reproduced before, verified after)
+
+1. **ffmpeg no longer outlives Squishy.** `CREATE_NO_WINDOW` gives ffmpeg its own hidden
+   console, so closing ours never reached it, and a closed console skips `finally:
+   app.shutdown()`. Each ffmpeg now joins a Win32 Job Object with KILL_ON_JOB_CLOSE (ctypes,
+   in `encoder.py`). Its handle is never closed, so the kernel kills ffmpeg whenever Python
+   dies, however it dies. Rejected: dropping `CREATE_NO_WINDOW`, which covers a console close but
+   not taskkill or a crash. Best effort: if the job can't be created or assigned, it logs a
+   warning and encodes anyway. Before: ffmpeg survived a hard kill of the server. After: gone.
+   Test: `test_lifetime.py`.
+2. **Busy port detected even when its owner set SO_REUSEADDR.** `SquishyServer` drops
+   SO_REUSEADDR on Windows and claims `SO_EXCLUSIVEADDRUSE`. Before: v0.2.0 bound on top of a
+   Python server on the same port. After: "busy; using a free port".
+3. **Unwritable output folder gives a 500 with the reason**, not a dropped connection
+   ("Server not reachable"). `unique_path` + `touch` now sit in the same try as `mkdir`.
+4. **A failed poll no longer locks the UI.** A network failure gets 6 retries (3 s), and an
+   HTTP error (e.g. a 404 after a server restart) gives up at once. Giving up clears
+   `state.job`, so `busy()` is false and the cards and drop work again. Checked in the
+   browser pane with a stubbed `fetch`: a 2 s blip is ridden out, a dead server gives up
+   at 3.1 s with the cards re-enabled, and a 404 gives up at 0.5 s, then a new drop loads.
+
+### Open findings (not fixed; ranked)
+
+5. Second drop during an upload doesn't abort the first; last to finish wins, poll breaks.
+6. A second instance's startup `rmtree` wipes the first's uploads (shared `%TEMP%\squishy`).
+7. Probe skips cover-art streams but the encoder maps `0:v:0`, so cover art first gives a frozen frame.
+8. After a failed upload the old "Squish it" button stays enabled.
+9. 409 / 422 sent before reading the body: the client sees a connection reset, not the message
+   (seen in the smoke test with a second-tab upload).
+10. `_encode` looks up the upload outside the lock (millisecond race).
+11. `http.client.HTTPException` (e.g. IncompleteRead) escapes `download_tools`, skipping the fallback.
+
+### Still needs a human at the PC
+
+Real double-click, Open folder, real drag-and-drop, SmartScreen on a downloaded zip.
+
+---
+
 ## 2026-09-24 - Sprint 3: shareable v0.2 (ffmpeg on demand, README, release notes)
 
 **Built:** `squishy/tools.py` (lookup + download), `--get-ffmpeg`, a Python check in

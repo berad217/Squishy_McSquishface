@@ -103,7 +103,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const MIB = 1024 * 1024;
-  const state = { source: null, plans: [], selected: null, job: null, poll: null, results: {} };
+  const state = { source: null, plans: [], selected: null, job: null, poll: null, pollFails: 0, results: {} };
 
   const fmtMB = (b) => (b < 0.05 * MIB ? "<0.1" : (b / MIB).toFixed(1));
   const fmtTime = (s) => {
@@ -246,9 +246,24 @@
     state.poll = setInterval(pollJob, 500);
   });
 
+  const POLL_RETRIES = 6; // x 500 ms: ride out a blip, not a dead server
+
   async function pollJob() {
+    if (!state.job) return;
     const res = await api("GET", `/api/job/${state.job.job_id}`);
-    if (!res.ok) { clearInterval(state.poll); return showStatus("err", "Lost track of the job", res.data.error); }
+    if (!res.ok) {
+      // Unreachable: keep trying for a few seconds. Any HTTP error (e.g. 404 after a
+      // server restart) won't fix itself. Either way, giving up must clear state.job,
+      // or busy() stays true and every drop and button is refused until a reload.
+      state.pollFails += 1;
+      if (res.status === 0 && state.pollFails < POLL_RETRIES) return;
+      clearInterval(state.poll);
+      state.pollFails = 0;
+      state.job = null;
+      renderCards();
+      return showStatus("err", "Lost track of the job", res.data.error);
+    }
+    state.pollFails = 0;
     state.job = res.data;
     if (!busy()) {
       clearInterval(state.poll);
@@ -314,9 +329,9 @@
       });
       let data = {};
       try { data = await r.json(); } catch (_) {}
-      return { ok: r.ok, data };
+      return { ok: r.ok, status: r.status, data };
     } catch (e) {
-      return { ok: false, data: { error: "Server not reachable. Is the Squishy console window still open?" } };
+      return { ok: false, status: 0, data: { error: "Server not reachable. Is the Squishy console window still open?" } };
     }
   }
 })();
