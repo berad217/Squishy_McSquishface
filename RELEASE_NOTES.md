@@ -10,8 +10,9 @@ installed. v0.2 is the version you can send to friends.
 - **Squishy fetches its own ffmpeg.** If ffmpeg isn't next to Squishy or on your PATH, the
   first launch asks one yes/no question and downloads it (110 MB download, ~200 MB on disk,
   once). It's a pinned build, **checked against a SHA-256 fingerprint before it's allowed to
-  run**. If the bytes don't match, they're thrown away. We are not in the business of running
-  mystery executables.
+  run**. There are two sources, so one being down doesn't strand you. If the bytes don't
+  match, they're thrown away and the next source gets a turn. We are not in the business of
+  running mystery executables.
 - **`python launch.py --get-ffmpeg`** does the same thing without the question, for scripts,
   agents and people who don't like being asked.
 - **A README for humans and for their AI agents.** The humans get a friendly version. The agents

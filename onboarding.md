@@ -36,8 +36,10 @@ python launch.py --no-browser --out <scratch dir>
 - **MB in the UI = MiB** (1024^2), to match Windows Explorer.
 - **Default port is 48123,** uncommon on purpose; 8000/8080/8765 are where local dev
   tools tend to live. Don't "simplify" it to one of those.
-- **ffmpeg is pinned** (`FFMPEG_VERSION`/`FFMPEG_SHA256` in `tools.py`). To bump it, update both
-  together; the comment there shows how to get and cross-check the digest. `bin/` is gitignored.
+- **ffmpeg is pinned** (`FFMPEG_VERSION`/`FFMPEG_SHA256` in `tools.py`, two `FFMPEG_URLS` for the
+  same bytes). To bump it, update them together; the comment there shows how to get and
+  cross-check the digest. Then run `SQUISHY_LIVE_DOWNLOAD=1 python -m pytest -k live`, which
+  downloads from each source separately. `bin/` is gitignored.
 - **`.gitattributes` forces CRLF on `.bat`.** The release zip is `git archive`, and LF-only
   batch files misbehave in cmd.exe.
 - Editing `server.py` / Python code requires restarting the server; `index.html` is read

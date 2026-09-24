@@ -55,7 +55,7 @@ def test_download_installs_only_what_we_need(tmp_path):
     url, sha = make_zip(tmp_path, GOOD)
     bin_dir = tmp_path / "bin"
     seen = []
-    result = download_tools(bin_dir, url=url, sha256=sha, progress=lambda d, t: seen.append((d, t)))
+    result = download_tools(bin_dir, urls=[url], sha256=sha, progress=lambda d, t: seen.append((d, t)))
 
     assert result.ffmpeg == str(bin_dir / FF)
     assert (bin_dir / FF).read_bytes() == b"FFMPEG"
@@ -70,27 +70,27 @@ def test_checksum_mismatch_installs_nothing(tmp_path):
     url, _ = make_zip(tmp_path, GOOD)
     bin_dir = tmp_path / "bin"
     with pytest.raises(DownloadError, match="checksum mismatch"):
-        download_tools(bin_dir, url=url, sha256="0" * 64)
+        download_tools(bin_dir, urls=[url], sha256="0" * 64)
     assert list(bin_dir.iterdir()) == []  # no exe, no leftover .part
 
 
 def test_zip_without_ffprobe_is_rejected(tmp_path):
     url, sha = make_zip(tmp_path, {f"x/bin/{FF}": b"FFMPEG"})
     with pytest.raises(DownloadError, match=FP):
-        download_tools(tmp_path / "bin", url=url, sha256=sha)
+        download_tools(tmp_path / "bin", urls=[url], sha256=sha)
 
 
 def test_member_paths_cannot_escape_bin(tmp_path):
     url, sha = make_zip(tmp_path, {f"../../{FF}": b"FFMPEG", f"/abs/{FP}": b"FFPROBE"})
     bin_dir = tmp_path / "deep" / "bin"
-    download_tools(bin_dir, url=url, sha256=sha)
+    download_tools(bin_dir, urls=[url], sha256=sha)
     assert (bin_dir / FF).is_file() and (bin_dir / FP).is_file()
     assert not (tmp_path / FF).exists()
 
 
 def test_network_error_becomes_download_error(tmp_path):
     with pytest.raises(DownloadError):
-        download_tools(tmp_path / "bin", url=(tmp_path / "nope.zip").as_uri(), sha256="0" * 64)
+        download_tools(tmp_path / "bin", urls=[(tmp_path / "nope.zip").as_uri()], sha256="0" * 64)
 
 
 def test_not_a_zip_is_rejected(tmp_path):
@@ -98,19 +98,50 @@ def test_not_a_zip_is_rejected(tmp_path):
     junk.write_bytes(b"<html>rate limited</html>")
     sha = hashlib.sha256(junk.read_bytes()).hexdigest()
     with pytest.raises(DownloadError, match="not a valid zip"):
-        download_tools(tmp_path / "bin", url=junk.as_uri(), sha256=sha)
+        download_tools(tmp_path / "bin", urls=[junk.as_uri()], sha256=sha)
 
 
 def test_pin_is_consistent():
     assert re.fullmatch(r"[0-9a-f]{64}", tools.FFMPEG_SHA256)
-    assert f"/{tools.FFMPEG_VERSION}/" in tools.FFMPEG_URL
-    assert tools.FFMPEG_URL.startswith("https://")
+    assert len(tools.FFMPEG_URLS) >= 2
+    for url in tools.FFMPEG_URLS:
+        assert url.startswith("https://")
+        assert f"ffmpeg-{tools.FFMPEG_VERSION}-essentials_build.zip" in url
+
+
+def test_falls_back_to_next_source(tmp_path):
+    url, sha = make_zip(tmp_path, GOOD)
+    dead = (tmp_path / "gone.zip").as_uri()
+    bin_dir = tmp_path / "bin"
+    result = download_tools(bin_dir, urls=[dead, url], sha256=sha)
+    assert (bin_dir / FF).read_bytes() == b"FFMPEG"
+    assert result.ffprobe == str(bin_dir / FP)
+
+
+def test_bad_hash_source_is_skipped_for_good_one(tmp_path):
+    good_url, sha = make_zip(tmp_path, GOOD)
+    evil = tmp_path / "evil"
+    evil.mkdir()
+    evil_url, _ = make_zip(evil, {f"x/{FF}": b"EVIL", f"x/{FP}": b"EVIL"})
+    bin_dir = tmp_path / "bin"
+    download_tools(bin_dir, urls=[evil_url, good_url], sha256=sha)
+    assert (bin_dir / FF).read_bytes() == b"FFMPEG"
+
+
+def test_all_sources_failing_reports_each(tmp_path):
+    a, b = (tmp_path / "a.zip").as_uri(), (tmp_path / "b.zip").as_uri()
+    with pytest.raises(DownloadError) as info:
+        download_tools(tmp_path / "bin", urls=[a, b], sha256="0" * 64)
+    assert str(info.value).count(";") == 1  # one failure per source
+    assert list((tmp_path / "bin").iterdir()) == []
 
 
 @pytest.mark.skipif(os.environ.get("SQUISHY_LIVE_DOWNLOAD") != "1" or os.name != "nt",
                     reason="set SQUISHY_LIVE_DOWNLOAD=1 to fetch the real ~110 MB build")
-def test_live_pinned_download(tmp_path):
-    result = download_tools(tmp_path / "bin")
+@pytest.mark.parametrize("url", tools.FFMPEG_URLS)
+def test_live_pinned_download(tmp_path, url):
+    """Each source on its own: a dead fallback is worse than none, since it looks like cover."""
+    result = download_tools(tmp_path / "bin", urls=[url])
     out = subprocess.run([result.ffmpeg, "-version"], capture_output=True, text=True, check=True)
     assert tools.FFMPEG_VERSION in out.stdout
     subprocess.run([result.ffprobe, "-version"], capture_output=True, check=True)

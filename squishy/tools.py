@@ -12,9 +12,10 @@ import hashlib
 import logging
 import os
 import shutil
+import urllib.parse
 import urllib.request
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,9 +30,11 @@ EXE_SUFFIX = ".exe" if os.name == "nt" else ""
 #   gh api repos/GyanD/codexffmpeg/releases/tags/<ver> --jq '.assets[].digest'
 # and cross-check it against gyan.dev's .sha256 file for the same package.
 FFMPEG_VERSION = "9.0.2"
-FFMPEG_URL = (
-    "https://github.com/GyanD/codexffmpeg/releases/download/"
-    f"{FFMPEG_VERSION}/ffmpeg-{FFMPEG_VERSION}-essentials_build.zip"
+_ZIP_NAME = f"ffmpeg-{FFMPEG_VERSION}-essentials_build.zip"
+# Same bytes from two hosts, tried in order; the pinned hash is what makes a host trusted.
+FFMPEG_URLS = (
+    f"https://github.com/GyanD/codexffmpeg/releases/download/{FFMPEG_VERSION}/{_ZIP_NAME}",
+    f"https://www.gyan.dev/ffmpeg/builds/packages/{_ZIP_NAME}",
 )
 FFMPEG_SHA256 = "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba"
 FFMPEG_BYTES = 114_768_076
@@ -79,24 +82,47 @@ def find_tools(bin_dir: Path = BIN_DIR) -> Tools | None:
 def download_tools(
     bin_dir: Path = BIN_DIR,
     *,
-    url: str = FFMPEG_URL,
+    urls: Sequence[str] = FFMPEG_URLS,
     sha256: str = FFMPEG_SHA256,
     progress: Progress | None = None,
 ) -> Tools:
     """Download the pinned ffmpeg build and install its executables into bin_dir.
 
+    Each source is tried in turn until one yields a zip with the pinned hash.
+
     Args:
         bin_dir: Destination folder (created if needed).
-        url: Zip to fetch (overridable for tests).
+        urls: Sources for the same zip, in order of preference.
         sha256: Expected hex digest of the zip.
-        progress: Optional callback(bytes_done, bytes_total_or_None).
+        progress: Optional callback(bytes_done, bytes_total_or_None); restarts
+            from zero if a source fails and the next is tried.
 
     Returns:
         Tools pointing into bin_dir.
 
     Raises:
-        DownloadError: On network/disk failure, checksum mismatch, or a zip
-            that lacks the executables.
+        DownloadError: If every source fails (network/disk error, checksum
+            mismatch, or a zip that lacks the executables).
+    """
+    failures: list[str] = []
+    for url in urls:
+        try:
+            _install_from(url, bin_dir, sha256, progress)
+        except DownloadError as exc:
+            host = urllib.parse.urlsplit(url).netloc or url
+            log.warning("ffmpeg from %s failed: %s", host, exc)
+            failures.append(f"{host}: {exc}")
+            continue
+        log.info("ffmpeg installed in %s", bin_dir)
+        return Tools(*(str(bin_dir / f"{name}{EXE_SUFFIX}") for name in TOOL_NAMES))
+    raise DownloadError("; ".join(failures) or "no download sources configured")
+
+
+def _install_from(url: str, bin_dir: Path, sha256: str, progress: Progress | None) -> None:
+    """Fetch one source, verify it, and extract into bin_dir.
+
+    Raises:
+        DownloadError: On any failure; bin_dir is left without a partial download.
     """
     part = bin_dir / "ffmpeg-download.zip.part"
     log.info("Downloading ffmpeg %s from %s", FFMPEG_VERSION, url)
@@ -118,8 +144,6 @@ def download_tools(
             part.unlink(missing_ok=True)
         except OSError as exc:
             log.warning("Could not delete %s: %s", part, exc)
-    log.info("ffmpeg installed in %s", bin_dir)
-    return Tools(*(str(bin_dir / f"{name}{EXE_SUFFIX}") for name in TOOL_NAMES))
 
 
 def _fetch(url: str, dest: Path, progress: Progress | None) -> str:

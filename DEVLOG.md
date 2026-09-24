@@ -7,8 +7,8 @@ Newest entries first. Decisions, rationale, and measured results; not a changelo
 ## 2026-09-24 - Sprint 3: shareable v0.2 (ffmpeg on demand, README, release notes)
 
 **Built:** `squishy/tools.py` (lookup + download), `--get-ffmpeg`, a Python check in
-`Squishy.bat`, README.md (human + agent sections), RELEASE_NOTES.md. 49 tests pass, plus 1
-opt-in live download test (`SQUISHY_LIVE_DOWNLOAD=1`).
+`Squishy.bat`, README.md (human + agent sections), RELEASE_NOTES.md, LICENSE (MIT). 52 tests pass,
+plus 2 opt-in live download tests, one per source (`SQUISHY_LIVE_DOWNLOAD=1`).
 
 ### Decisions
 
@@ -23,6 +23,11 @@ opt-in live download test (`SQUISHY_LIVE_DOWNLOAD=1`).
   asset URL is stable per tag, while gyan.dev's "latest" URL moves. SHA-256 `60f46726...`
   cross-checked from two sources: GitHub's asset digest and gyan.dev's `.sha256` file. The
   7z is a third of the size, but the stdlib can't read 7z, and adding a dependency is worse.
+- **Two sources, one hash.** The mirror goes first and gyan.dev's own `packages/` copy is the
+  fallback. Both serve identical bytes (114,768,076, same digest). Any failure, a hash
+  mismatch included, moves on to the next source; the hash is the trust anchor, not the host.
+  The live test downloads from each source separately, because a dead fallback looks like
+  cover and isn't.
 - **Extract by basename into names we choose.** Archive paths are never trusted (no zip-slip),
   and each file goes to a `.tmp` name and then `os.replace`, so a crash can't leave a
   half-written `ffmpeg.exe` for lookup to find. Only ffmpeg.exe, ffprobe.exe and LICENSE are kept.
@@ -36,14 +41,14 @@ opt-in live download test (`SQUISHY_LIVE_DOWNLOAD=1`).
   surprise 110 MB download.
 - **`.gitattributes` forces CRLF on `.bat`.** The index stored it as LF, the GitHub "Source code
   (zip)" is a `git archive`, and cmd.exe misparses LF-only batch files in some cases.
-
 - **MIT for Squishy; ffmpeg stays at arm's length.** The gyan essentials build is GPLv3. We
   only exec it as a separate process and never distribute it, so GPL obligations sit with
   gyan.dev as the distributor. Bundling it into a release zip would move them onto us.
 
 ### Verified
 
-- Live pinned download (`SQUISHY_LIVE_DOWNLOAD=1`): 6.6 s, hash matched, `-version` reports 9.0.2.
+- Live pinned download (`SQUISHY_LIVE_DOWNLOAD=1`), each source separately: GitHub 5.4 s,
+  gyan.dev 9.7 s. Both hashes matched and `-version` reports 9.0.2.
 - `launch.py --get-ffmpeg` into the real `bin/`, then with PATH stripped of ffmpeg: the bin
   ffprobe probed a 1080p60 clip and the bin ffmpeg encoded it on Heavy, 607 KB vs 945 KB ceiling.
 - Installed footprint is **~200 MB** (two static ~100 MB exes), not the 110 MB download size.
@@ -51,6 +56,8 @@ opt-in live download test (`SQUISHY_LIVE_DOWNLOAD=1`).
 
 ### Not verified
 
+- Cosmetic: if a source dies mid-download, its WARNING prints on the same console line as
+  the progress counter. The download still falls back correctly.
 - A clean machine, and Mark-of-the-Web/SmartScreen behaviour on a `.bat` from a downloaded zip.
 - The v0.1 items are still open: real double-click, Open folder, real OS drag-and-drop.
 - **The repo is private.** Friends can't see Releases until it's public or they're added as

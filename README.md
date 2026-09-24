@@ -67,8 +67,8 @@ one, and ask the human before installing anything system-wide.
    `python` alias (it prints "Python was not found") as missing.
 2. **No pip install step.** Squishy uses only the standard library. Don't create a venv for it.
 3. **ffmpeg.** From the repo root, run `python launch.py --get-ffmpeg`. It downloads a pinned
-   ffmpeg build (gyan.dev 9.0.2 essentials, from its GitHub mirror), checks it against a
-   hard-coded SHA-256, and puts `ffmpeg.exe` and `ffprobe.exe` in `./bin/`. Exit code 0 means it
+   ffmpeg build (gyan.dev 9.0.2 essentials: its GitHub mirror first, then gyan.dev itself),
+   checks it against a hard-coded SHA-256, and puts `ffmpeg.exe` and `ffprobe.exe` in `./bin/`. Exit code 0 means it
    worked. If `ffmpeg` and `ffprobe` are already on PATH you can skip this step: lookup order is
    `./bin/`, then PATH.
 4. **Verify (optional, ~15 s).** Run `python -m pytest -q` (needs `pip install pytest`). The
