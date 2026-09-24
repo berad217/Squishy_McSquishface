@@ -71,6 +71,8 @@ class AppState:
     out_dir: Path
     uploads: dict[str, Upload] = field(default_factory=dict)
     jobs: dict[str, EncodeJob] = field(default_factory=dict)
+    ffmpeg: str = "ffmpeg"
+    ffprobe: str = "ffprobe"
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def active_job(self) -> EncodeJob | None:
@@ -253,7 +255,7 @@ class Handler(BaseHTTPRequestHandler):
                         raise OSError("client disconnected mid-upload")
                     fh.write(chunk)
                     remaining -= len(chunk)
-            info = probe_file(dest, file_id=file_id, name=name)
+            info = probe_file(dest, file_id=file_id, name=name, ffprobe=self.app.ffprobe)
         except (OSError, ProbeError) as exc:
             dest.unlink(missing_ok=True)
             log.error("Upload of %s rejected: %s", name, exc)
@@ -291,7 +293,7 @@ class Handler(BaseHTTPRequestHandler):
             dst = unique_path(self.app.out_dir, f"{safe_stem(upload.info.name)}_{preset.id}", ".mp4")
             dst.touch()  # reserve the name so a quick second job can't pick it
             job = EncodeJob(secrets.token_hex(4), upload.path, dst, plan_for(upload.info, preset),
-                            upload.info.duration_s)
+                            upload.info.duration_s, ffmpeg=self.app.ffmpeg)
             self.app.jobs[job.job_id] = job
             job.start()
         return self._send_json(HTTPStatus.OK, job.status())

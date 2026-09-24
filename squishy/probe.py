@@ -133,13 +133,14 @@ def parse_probe(data: dict, *, file_id: str, name: str, size_bytes: int) -> Sour
     )
 
 
-def probe_file(path: Path, *, file_id: str, name: str) -> SourceInfo:
+def probe_file(path: Path, *, file_id: str, name: str, ffprobe: str = "ffprobe") -> SourceInfo:
     """Run ffprobe on a file.
 
     Args:
         path: File to probe.
         file_id: Upload identifier to embed.
         name: Original filename to embed.
+        ffprobe: Path to the ffprobe executable.
 
     Returns:
         SourceInfo for the file.
@@ -148,7 +149,7 @@ def probe_file(path: Path, *, file_id: str, name: str) -> SourceInfo:
         ProbeError: If ffprobe fails or the file is not a usable video.
     """
     cmd = [
-        "ffprobe", "-v", "error", "-print_format", "json",
+        ffprobe, "-v", "error", "-print_format", "json",
         "-show_format", "-show_streams", str(path),
     ]
     log.info("Probing %s", path.name)

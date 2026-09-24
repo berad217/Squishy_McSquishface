@@ -4,6 +4,60 @@ Newest entries first. Decisions, rationale, and measured results; not a changelo
 
 ---
 
+## 2026-09-24 - Sprint 3: shareable v0.2 (ffmpeg on demand, README, release notes)
+
+**Built:** `squishy/tools.py` (lookup + download), `--get-ffmpeg`, a Python check in
+`Squishy.bat`, README.md (human + agent sections), RELEASE_NOTES.md. 49 tests pass, plus 1
+opt-in live download test (`SQUISHY_LIVE_DOWNLOAD=1`).
+
+### Decisions
+
+- **Download ffmpeg on request; don't bundle it.** Bundling adds ~110 MB to every copy and
+  makes us the redistributor of a GPL binary (x264), with the source-offer obligations that
+  brings. When the friend's machine fetches it from gyan.dev's mirror, we don't redistribute.
+- **Python not bundled** (user call). The friends have AI agents, so a precise agent section in
+  the README beats shipping embedded Python. `Squishy.bat` now tries `py -3` then `python`
+  with `--version`, which also filters out the Microsoft Store stub, and prints install
+  instructions instead of failing cryptically.
+- **Pinned source: GitHub mirror `GyanD/codexffmpeg` tag 9.0.2, essentials zip.** A release
+  asset URL is stable per tag, while gyan.dev's "latest" URL moves. SHA-256 `60f46726...`
+  cross-checked from two sources: GitHub's asset digest and gyan.dev's `.sha256` file. The
+  7z is a third of the size, but the stdlib can't read 7z, and adding a dependency is worse.
+- **Extract by basename into names we choose.** Archive paths are never trusted (no zip-slip),
+  and each file goes to a `.tmp` name and then `os.replace`, so a crash can't leave a
+  half-written `ffmpeg.exe` for lookup to find. Only ffmpeg.exe, ffprobe.exe and LICENSE are kept.
+- **Lookup is per tool: `bin/`, then PATH.** `bin/` wins so a friend's odd PATH ffmpeg can't
+  shadow the known-good build once they've downloaded it.
+- **Tool paths are injected, not global** (MODERATE). `AppState.ffmpeg/ffprobe` feed
+  `probe_file(ffprobe=)` and `EncodeJob(ffmpeg=)`, and every default is the bare name, so no
+  existing test changed.
+- **The prompt defaults to yes on Enter; EOF means no.** A friend presses Enter. An agent
+  without a console gets exit 1 and a pointer to `--get-ffmpeg` instead of a hang or a
+  surprise 110 MB download.
+- **`.gitattributes` forces CRLF on `.bat`.** The index stored it as LF, the GitHub "Source code
+  (zip)" is a `git archive`, and cmd.exe misparses LF-only batch files in some cases.
+
+- **MIT for Squishy; ffmpeg stays at arm's length.** The gyan essentials build is GPLv3. We
+  only exec it as a separate process and never distribute it, so GPL obligations sit with
+  gyan.dev as the distributor. Bundling it into a release zip would move them onto us.
+
+### Verified
+
+- Live pinned download (`SQUISHY_LIVE_DOWNLOAD=1`): 6.6 s, hash matched, `-version` reports 9.0.2.
+- `launch.py --get-ffmpeg` into the real `bin/`, then with PATH stripped of ffmpeg: the bin
+  ffprobe probed a 1080p60 clip and the bin ffmpeg encoded it on Heavy, 607 KB vs 945 KB ceiling.
+- Installed footprint is **~200 MB** (two static ~100 MB exes), not the 110 MB download size.
+  The prompt and README say both.
+
+### Not verified
+
+- A clean machine, and Mark-of-the-Web/SmartScreen behaviour on a `.bat` from a downloaded zip.
+- The v0.1 items are still open: real double-click, Open folder, real OS drag-and-drop.
+- **The repo is private.** Friends can't see Releases until it's public or they're added as
+  collaborators.
+
+---
+
 ## 2026-09-23 - Sprints 1 + 2: engine, server, UI (v0.1)
 
 **Built:** everything in spec.md sections 5-6. 40 tests pass (`python -m pytest --tb=short -q`, ~13 s,

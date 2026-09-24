@@ -170,6 +170,16 @@ All presets: `libx264 -preset slow -crf 23 -bufsize 2*maxrate -pix_fmt yuv420p`,
 - **Deliverables:** `server.py`, `index.html`, `launch.py`, `Squishy.bat`, onboarding.md,
   DEVLOG entry.
 
+### Sprint 3: Shareable v0.2
+
+- **Goal:** A friend can run Squishy from a GitHub release without being walked through it.
+- **Success Criteria:** on a clean Windows machine with Python but no ffmpeg: unzip,
+  double-click, one Y/N, squish, with no commands typed. Without Python, the .bat explains
+  what to install instead of failing cryptically. Downloaded ffmpeg is pinned and
+  SHA-256-verified. The README has a human section and an agent section.
+- **Deliverables:** `squishy/tools.py`, `--get-ffmpeg`, Python check in `Squishy.bat`,
+  README.md, RELEASE_NOTES.md, DEVLOG entry.
+
 ## 8. Out of Scope
 
 - Destination-aware limits (WhatsApp/Discord/email caps) - user's responsibility.
@@ -177,7 +187,8 @@ All presets: `libx264 -preset slow -crf 23 -bufsize 2*maxrate -pix_fmt yuv420p`,
 - Batch / multi-file queue.
 - Trimming, cropping, audio removal, format choices other than MP4/H.264.
 - Hardware encoders (NVENC/QSV).
-- Packaging as a standalone .exe or bundling ffmpeg.
+- Packaging as a standalone .exe, bundling Python, or redistributing ffmpeg binaries
+  (v0.2 downloads a pinned ffmpeg build on request instead; see DEVLOG 2026-09-24).
 - Access from other devices on the network.
 
 ## Parking Lot

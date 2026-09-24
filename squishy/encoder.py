@@ -19,13 +19,14 @@ X264_PRESET = "slow"
 X264_CRF = 23
 
 
-def build_ffmpeg_args(src: Path, dst: Path, plan: Plan) -> list[str]:
+def build_ffmpeg_args(src: Path, dst: Path, plan: Plan, ffmpeg: str = "ffmpeg") -> list[str]:
     """Build the ffmpeg argv for one encode. Pure function.
 
     Args:
         src: Input file.
         dst: Output .mp4 path.
         plan: Resolved preset parameters.
+        ffmpeg: Path to the ffmpeg executable.
 
     Returns:
         Argument list suitable for subprocess (no shell).
@@ -36,7 +37,7 @@ def build_ffmpeg_args(src: Path, dst: Path, plan: Plan) -> list[str]:
     filters.append(f"scale={plan.out_width}:{plan.out_height}")
 
     args = [
-        "ffmpeg", "-hide_banner", "-nostdin", "-y", "-loglevel", "error",
+        ffmpeg, "-hide_banner", "-nostdin", "-y", "-loglevel", "error",
         "-i", str(src),
         "-map", "0:v:0", "-map", "0:a:0?",
         "-vf", ",".join(filters),
@@ -92,7 +93,8 @@ class ProgressTracker:
 class EncodeJob:
     """One ffmpeg run in a background thread, with cancel and cleanup."""
 
-    def __init__(self, job_id: str, src: Path, dst: Path, plan: Plan, duration_s: float) -> None:
+    def __init__(self, job_id: str, src: Path, dst: Path, plan: Plan, duration_s: float,
+                 ffmpeg: str = "ffmpeg") -> None:
         """Create (but do not start) a job.
 
         Args:
@@ -101,11 +103,13 @@ class EncodeJob:
             dst: Output path; deleted on failure or cancel.
             plan: Resolved preset parameters.
             duration_s: Source duration for progress.
+            ffmpeg: Path to the ffmpeg executable.
         """
         self.job_id = job_id
         self.src = src
         self.dst = dst
         self.plan = plan
+        self.ffmpeg = ffmpeg
         self.state = "queued"
         self.error: str | None = None
         self.output_bytes: int | None = None
@@ -169,7 +173,7 @@ class EncodeJob:
             log.warning("Could not delete partial output %s: %s", self.dst, exc)
 
     def _run(self) -> None:
-        args = build_ffmpeg_args(self.src, self.dst, self.plan)
+        args = build_ffmpeg_args(self.src, self.dst, self.plan, self.ffmpeg)
         log.info("Job %s start: %s -> %s", self.job_id, self.plan.preset_id, self.dst.name)
         self.started_at = time.monotonic()
         try:
