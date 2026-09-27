@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from squishy.encoder import ProgressTracker, build_ffmpeg_args
 from squishy.presets import PRESETS_BY_ID, SourceInfo, plan_for
 
@@ -54,3 +56,24 @@ def test_progress_tracker_percent_and_end():
     assert t.feed("out_time_us=1000000") == 25.0  # never goes backwards
     assert t.feed("out_time_us=20000000") == 99.9  # clamped until 'end'
     assert t.feed("progress=end\n") == 100.0 and t.finished
+
+
+# Frozen from v0.2.4. An untouched trim must reproduce these exactly (spec Sprint 4,
+# criterion 1). Change them only on purpose, with a DEVLOG entry saying why.
+V024_ARGS = {
+    "light": "-vf scale=1920:1080 -c:v libx264 -preset slow -crf 23 -maxrate 8000k -bufsize 16000k "
+             "-pix_fmt yuv420p -c:a aac -b:a 160k",
+    "medium": "-vf scale=1920:1080 -c:v libx264 -preset slow -crf 23 -maxrate 3500k -bufsize 7000k "
+              "-pix_fmt yuv420p -c:a aac -b:a 128k",
+    "heavy": "-vf fps=30,scale=1280:720 -c:v libx264 -preset slow -crf 23 -maxrate 1500k -bufsize 3000k "
+             "-pix_fmt yuv420p -c:a aac -b:a 96k",
+    "extreme": "-vf fps=30,scale=960:540 -c:v libx264 -preset slow -crf 23 -maxrate 600k -bufsize 1200k "
+               "-pix_fmt yuv420p -c:a aac -b:a 64k",
+}
+
+
+@pytest.mark.parametrize("preset_id", list(V024_ARGS))
+def test_untrimmed_args_match_v024(preset_id):
+    expected = ("ffmpeg -hide_banner -nostdin -y -loglevel error -i in.mp4 -map 0:V:0 -map 0:a:0? "
+                f"{V024_ARGS[preset_id]} -movflags +faststart -progress pipe:1 -nostats out.mp4").split()
+    assert _args(preset_id) == expected

@@ -8,6 +8,10 @@ computable ceiling.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .trim import Trim
 
 # x264 starts the VBV buffer 90% full (vbv-init default), so the encoder may
 # spend that much extra on top of maxrate * duration.
@@ -133,12 +137,13 @@ def estimate_bytes(duration_s: float, video_kbps: int, audio_kbps: int) -> int:
     return int((video_bits + audio_bits) / 8 * CONTAINER_OVERHEAD)
 
 
-def plan_for(source: SourceInfo, preset: Preset) -> Plan:
+def plan_for(source: SourceInfo, preset: Preset, trim: Trim | None = None) -> Plan:
     """Resolve a preset against a source into concrete encode parameters.
 
     Args:
         source: Probed source info.
         preset: Preset to apply.
+        trim: Kept range, or None for the whole source. The ceiling follows its length.
 
     Returns:
         The Plan, including the size estimate.
@@ -153,7 +158,8 @@ def plan_for(source: SourceInfo, preset: Preset) -> Plan:
     bitrate_capped = bool(source.video_kbps) and source.video_kbps < preset.video_kbps
     if bitrate_capped:
         video_kbps = max(100, source.video_kbps)
-    est = estimate_bytes(source.duration_s, video_kbps, audio_kbps)
+    duration = trim.duration_s if trim else source.duration_s
+    est = estimate_bytes(duration, video_kbps, audio_kbps)
     ratio = est / source.size_bytes if source.size_bytes > 0 else 0.0
     return Plan(
         preset_id=preset.id,
@@ -170,6 +176,6 @@ def plan_for(source: SourceInfo, preset: Preset) -> Plan:
     )
 
 
-def plans_for(source: SourceInfo) -> list[Plan]:
+def plans_for(source: SourceInfo, trim: Trim | None = None) -> list[Plan]:
     """Return a Plan for every preset, lightest compression first."""
-    return [plan_for(source, p) for p in PRESETS]
+    return [plan_for(source, p, trim) for p in PRESETS]

@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from .presets import Plan
+from .trim import SEEK_SLACK_S, CopyPlan, Trim
 
 log = logging.getLogger(__name__)
 
@@ -93,7 +94,14 @@ def kill_with_this_process(proc: subprocess.Popen) -> None:
                         proc.pid, ctypes.get_last_error())
 
 
-def build_ffmpeg_args(src: Path, dst: Path, plan: Plan, ffmpeg: str = "ffmpeg") -> list[str]:
+def _seek(seconds: float) -> list[str]:
+    """Input-side seek. Transcoding from it is frame-accurate: ffmpeg decodes from the
+    keyframe before and drops frames earlier than the target."""
+    return ["-ss", f"{seconds:.6f}"]
+
+
+def build_ffmpeg_args(src: Path, dst: Path, plan: Plan, ffmpeg: str = "ffmpeg",
+                      trim: Trim | None = None) -> list[str]:
     """Build the ffmpeg argv for one encode. Pure function.
 
     Args:
@@ -101,6 +109,7 @@ def build_ffmpeg_args(src: Path, dst: Path, plan: Plan, ffmpeg: str = "ffmpeg") 
         dst: Output .mp4 path.
         plan: Resolved preset parameters.
         ffmpeg: Path to the ffmpeg executable.
+        trim: Kept range, or None for the whole source (then the args are v0.2.4's).
 
     Returns:
         Argument list suitable for subprocess (no shell).
@@ -110,9 +119,14 @@ def build_ffmpeg_args(src: Path, dst: Path, plan: Plan, ffmpeg: str = "ffmpeg") 
         filters.append(f"fps={plan.out_fps:g}")
     filters.append(f"scale={plan.out_width}:{plan.out_height}")
 
+    seek, limit = [], []
+    if trim is not None:
+        # Back off a hair so a frame whose time equals the in-point is kept.
+        seek = _seek(max(0.0, trim.in_s - SEEK_SLACK_S))
+        limit = ["-t", f"{trim.duration_s:.6f}"]
     args = [
         ffmpeg, "-hide_banner", "-nostdin", "-y", "-loglevel", "error",
-        "-i", str(src),
+        *seek, "-i", str(src), *limit,
         # V, not v: skip cover art / attached pictures, the same streams probe.py skips.
         "-map", "0:V:0", "-map", "0:a:0?",
         "-vf", ",".join(filters),
@@ -125,6 +139,63 @@ def build_ffmpeg_args(src: Path, dst: Path, plan: Plan, ffmpeg: str = "ffmpeg") 
     else:
         args += ["-an"]
     args += ["-movflags", "+faststart", "-progress", "pipe:1", "-nostats", str(dst)]
+    return args
+
+
+MP4_FAMILY = {".mp4", ".m4v", ".mov"}
+
+
+def build_copy_args(src: Path, dst: Path, start_s: float, trim: Trim,
+                    ffmpeg: str = "ffmpeg") -> list[str]:
+    """Build the ffmpeg argv for the Original card: a stream copy of the trim.
+
+    Args:
+        src: Input file.
+        dst: Output path, same container (extension) as src.
+        start_s: The snapped keyframe to start from (see trim.snap_to_keyframe).
+        trim: Kept range; its out-point ends the copy.
+        ffmpeg: Path to the ffmpeg executable.
+
+    Returns:
+        Argument list suitable for subprocess (no shell).
+    """
+    # A copy can only start on a keyframe; the demuxer seeks to the keyframe at or
+    # before -ss. Aim just past the chosen one so rounding can't land on the one before.
+    args = [
+        ffmpeg, "-hide_banner", "-nostdin", "-y", "-loglevel", "error",
+        *_seek(start_s + SEEK_SLACK_S), "-i", str(src),
+        "-t", f"{trim.out_s - start_s:.6f}",
+        "-map", "0:V:0", "-map", "0:a:0?", "-c", "copy", "-avoid_negative_ts", "make_zero",
+    ]
+    if dst.suffix.lower() in MP4_FAMILY:
+        args += ["-movflags", "+faststart"]
+    args += ["-progress", "pipe:1", "-nostats", str(dst)]
+    return args
+
+
+def build_frame_args(src: Path, dst: Path, t: float, ffmpeg: str = "ffmpeg",
+                     max_width: int | None = None) -> list[str]:
+    """Build the ffmpeg argv to extract the frame shown at time t as a JPEG.
+
+    Args:
+        src: Input file.
+        dst: Output .jpg path, or '-' for stdout.
+        t: Presentation time of the frame, seconds.
+        ffmpeg: Path to the ffmpeg executable.
+        max_width: Scale down to at most this width (fallback player); None keeps
+            full resolution (Save frame).
+
+    Returns:
+        Argument list suitable for subprocess (no shell).
+    """
+    args = [
+        ffmpeg, "-hide_banner", "-nostdin", "-y", "-loglevel", "error",
+        *_seek(max(0.0, t - SEEK_SLACK_S)), "-i", str(src), "-map", "0:V:0", "-frames:v", "1",
+    ]
+    if max_width is not None:
+        args += ["-vf", f"scale='min({max_width},iw)':-2"]
+    # mjpeg's -q:v runs 2 (best) to 31; 2 is the "quality 95" the spec asks for.
+    args += ["-q:v", "2", "-f", "mjpeg", str(dst)]
     return args
 
 
@@ -168,23 +239,26 @@ class ProgressTracker:
 class EncodeJob:
     """One ffmpeg run in a background thread, with cancel and cleanup."""
 
-    def __init__(self, job_id: str, src: Path, dst: Path, plan: Plan, duration_s: float,
-                 ffmpeg: str = "ffmpeg") -> None:
+    def __init__(self, job_id: str, src: Path, dst: Path, plan: Plan | CopyPlan, duration_s: float,
+                 ffmpeg: str = "ffmpeg", args: list[str] | None = None) -> None:
         """Create (but do not start) a job.
 
         Args:
             job_id: Identifier for status polling.
             src: Input file.
             dst: Output path; deleted on failure or cancel.
-            plan: Resolved preset parameters.
-            duration_s: Source duration for progress.
+            plan: Resolved preset parameters, or a CopyPlan for the Original card.
+            duration_s: Output duration, for progress.
             ffmpeg: Path to the ffmpeg executable.
+            args: Full ffmpeg argv; None builds the untrimmed encode from plan.
+                Must write progress to stdout (-progress pipe:1).
         """
         self.job_id = job_id
         self.src = src
         self.dst = dst
         self.plan = plan
         self.ffmpeg = ffmpeg
+        self.args = args
         self.state = "queued"
         self.error: str | None = None
         self.output_bytes: int | None = None
@@ -248,7 +322,7 @@ class EncodeJob:
             log.warning("Could not delete partial output %s: %s", self.dst, exc)
 
     def _run(self) -> None:
-        args = build_ffmpeg_args(self.src, self.dst, self.plan, self.ffmpeg)
+        args = self.args or build_ffmpeg_args(self.src, self.dst, self.plan, self.ffmpeg)
         log.info("Job %s start: %s -> %s", self.job_id, self.plan.preset_id, self.dst.name)
         self.started_at = time.monotonic()
         try:
