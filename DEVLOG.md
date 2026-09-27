@@ -4,6 +4,32 @@ Newest entries first. Decisions, rationale, and measured results; not a changelo
 
 ---
 
+## 2026-09-27 - v0.3 planned: trim + stills (grilled)
+
+Plan and success criteria are in spec.md Sprint 4. Two decisions a later reader would
+question:
+
+- **Decision (user): trimming comes into scope,** reversing spec section 8. Trimming is
+  compression by another means: every size ceiling is linear in duration, so a 31 s -> 10 s
+  cut shrinks every preset ~3x at no quality cost. That is the app's job ("make it fit"), with
+  a better lever than bitrate. It is a setting on the one screen, not a mode, and untouched
+  in/out points must give v0.2.4's exact ffmpeg args. Stills ride along only because the
+  player makes them nearly free; the out list (spec Sprint 4) is what keeps this from
+  becoming an editor.
+- **Decision (user): the Original card cuts at keyframes and says so.** A stream copy can
+  only start on a keyframe (P-frames need their reference), so the start snaps *back* to the
+  keyframe at or before the in-point. Nothing asked for is lost, the card shows the snap,
+  and the out-point is exact. Rejected: a frame-accurate "near-lossless" re-encode (that is
+  Light without the cap, not "as is"), an edit-list lead-in (player support unverified), and
+  a smart cut (re-encode the first partial GOP; fragile at the seam). Snap size depends on the
+  source: the UE captures have a keyframe every 0.5 s, phones 1-2 s, OBS ~2 s or more.
+
+Test approach: pure parts test-first (the v0.2.4 args pin, Range parsing, keyframe snap,
+trimmed estimates, names); the displayed-frame-equals-saved-frame question gets a spike before
+it gets a test; scrubber feel and layout are checked in a real browser, not unit-tested.
+
+---
+
 ## 2026-09-27 - Spike: NVENC vs x264 (Parking Lot)
 
 Question: is `h264_nvenc` (RTX 3090) fast enough, at acceptable quality per byte, to offer?

@@ -9,6 +9,7 @@ Python stdlib + ffmpeg. Single user, Windows, localhost only.
 | Where | What |
 |---|---|
 | `spec.md` | What to build, success criteria, out-of-scope list, parking lot |
+| `CONTEXT.md` | Glossary: preset, ceiling, trim vs crop, Original, snap, still. Use these names |
 | `DEVLOG.md` | What was built and why; measured results on the reference clip |
 | `README.md` / `RELEASE_NOTES.md` | User-facing: install steps for humans + agents; cheeky per-release notes |
 | `Squishy.bat` -> `launch.py` | Entry point: finds Python, finds/offers ffmpeg, starts server on 127.0.0.1:48123, opens browser |

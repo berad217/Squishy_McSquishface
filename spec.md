@@ -3,7 +3,8 @@
 ## 1. Overview
 
 **Purpose:** Drop a video into a browser page, see the estimated output size for several
-compression levels, pick one, get a smaller MP4.
+compression levels, pick one, get a smaller MP4. From v0.3, optionally trim it to a clip
+or save a single frame first.
 
 **Context:** Game-engine captures (Unreal Engine 5) come out at 4K60 and ~60 Mbps
 (227 MB for 31 s). The recipe below shrank one to 12.1 MB with no visible loss:
@@ -181,12 +182,53 @@ All presets: `libx264 -preset slow -crf 23 -bufsize 2*maxrate -pix_fmt yuv420p`,
 - **Deliverables:** `squishy/tools.py`, `--get-ffmpeg`, Python check in `Squishy.bat`,
   README.md, RELEASE_NOTES.md, DEVLOG entry.
 
+### Sprint 4: v0.3 trim + stills
+
+Grilled 2026-09-27; the two load-bearing decisions are in the DEVLOG. Terms are defined in
+`CONTEXT.md`.
+
+- **Goal:** Cut a clip out of a capture and squish just that, or grab one frame, on the same
+  single screen.
+- **What it adds:**
+  - A **player** (always visible, capped at ~40% of window height) between the source
+    info and the cards, with a **trim bar** under it: drag handles, "Set start / Set end at
+    playhead" buttons, keys `I`/`O` (set in/out), arrows (1 frame), Shift+arrows (1 s),
+    Space (play/pause). Times shown as `mm:ss.mmm`; no typed entry.
+  - The player is the browser's `<video>` on the uploaded file, served with HTTP Range.
+    If the browser can't play the file, it falls back to silent frames rendered by ffmpeg
+    on request. Trim and stills work in both modes.
+  - Every card's estimate follows the trimmed duration, recomputed server-side so the
+    math stays in `presets.py`. The Squish button lives in a bottom bar that is always visible.
+  - An **Original** card, shown only when trimmed: stream copy, start snapped to the
+    keyframe at or before the in-point, the card showing the snap. Keeps the source's
+    container. Its size is exact (packet sizes in range), not a ceiling.
+  - **Save frame**: ffmpeg extracts the displayed frame (by its presentation time) as a
+    full-resolution JPEG (`-q:v 2`) into the output folder, `<stem>_still_<mm-ss.mmm>.jpg`.
+  - Trimmed outputs are named `<stem>_<preset>_<in>-<out>.<ext>`; untrimmed names are unchanged.
+    The trim survives across encodes of the same upload.
+- **Out of v0.3:** multiple segments, a timeline, spatial crop, audio editing, GIF export,
+  still batches or galleries, typed-in times.
+- **Success Criteria:**
+  1. Untouched trim: ffmpeg args identical to v0.2.4 (pinned by a test written first).
+  2. A trimmed encode starts on the exact in-point frame and lasts `out - in` +/- 1 frame,
+     every preset (integration test on a generated clip with a burned-in frame counter).
+  3. Reference clip, trimmed: actual <= estimate * 1.03, every preset.
+  4. Original: starts on the snapped keyframe, the card's snap equals the output's, and the container is kept.
+  5. The saved still is the displayed frame, checked on the VFR reference clip.
+  6. Range requests return 206 with the right bytes; seeking works in a real browser.
+  7. The fallback engages on a file Chrome can't play; trim and still still work.
+  8. All existing tests pass; version 0.3.0; README and RELEASE_NOTES updated.
+- **Deliverables:** code, tests (pure parts test-first), DEVLOG entry with the still-frame
+  measurement, GitHub release (after the user confirms).
+
 ## 8. Out of Scope
 
 - Destination-aware limits (WhatsApp/Discord/email caps) - user's responsibility.
 - Hitting an exact target size (two-pass encoding).
 - Batch / multi-file queue.
-- Trimming, cropping, audio removal, format choices other than MP4/H.264.
+- Spatial cropping, audio removal, format choices other than MP4/H.264 (the Original
+  card's stream copy keeps the source's container; that is the one exception). Trimming
+  was listed here until v0.3; see Sprint 4.
 - Hardware encoders (NVENC/QSV).
 - Packaging as a standalone .exe, bundling Python, or redistributing ffmpeg binaries
   (v0.2 downloads a pinned ffmpeg build on request instead; see DEVLOG 2026-09-24).
