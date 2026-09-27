@@ -10,8 +10,8 @@ Plan and success criteria are in spec.md Sprint 4. Two decisions a later reader 
 question:
 
 - **Decision (user): trimming comes into scope,** reversing spec section 8. Trimming is
-  compression by another means: every size ceiling is linear in duration, so a 31 s -> 10 s
-  cut shrinks every preset ~3x at no quality cost. That is the app's job ("make it fit"), with
+  compression by another means: every size ceiling grows with duration (plus a fixed 1.8 s
+  VBV-buffer term), so a 31 s -> 10 s cut shrinks every preset ~2.8x at no quality cost. That is the app's job ("make it fit"), with
   a better lever than bitrate. It is a setting on the one screen, not a mode, and untouched
   in/out points must give v0.2.4's exact ffmpeg args. Stills ride along only because the
   player makes them nearly free; the out list (spec Sprint 4) is what keeps this from

@@ -18,9 +18,21 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import __version__
-from .encoder import EncodeJob
+from .encoder import NO_WINDOW, EncodeJob, build_copy_args, build_ffmpeg_args, build_frame_args
 from .presets import PRESETS_BY_ID, SourceInfo, plan_for, plans_for
-from .probe import ProbeError, probe_file
+from .probe import ProbeError, probe_file, probe_packets
+from .trim import (
+    CopyPlan,
+    Packet,
+    RangeNotSatisfiable,
+    Trim,
+    copy_bytes,
+    fmt_stamp,
+    make_trim,
+    output_stem,
+    parse_range,
+    snap_to_keyframe,
+)
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +40,10 @@ STATIC_DIR = Path(__file__).parent / "static"
 CHUNK = 1024 * 1024
 WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
                     *(f"LPT{i}" for i in range(1, 10))}
+MEDIA_TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime",
+               ".mkv": "video/x-matroska", ".webm": "video/webm", ".avi": "video/x-msvideo",
+               ".ts": "video/mp2t", ".mts": "video/mp2t", ".m2ts": "video/mp2t"}
+PREVIEW_WIDTH = 960  # fallback player frames: plenty for picking a cut point
 
 
 def safe_stem(filename: str) -> str:
@@ -60,10 +76,32 @@ def unique_path(directory: Path, stem: str, suffix: str) -> Path:
 
 @dataclass
 class Upload:
-    """A received source file."""
+    """A received source file, and its packets once the background scan is done."""
 
     path: Path
     info: SourceInfo
+    video_packets: list[Packet] | None = None  # None until scanned; set last
+    audio_packets: list[Packet] = field(default_factory=list)
+    scan_error: str | None = None
+
+    def scan(self, ffprobe: str) -> None:
+        """List packets for the Original card (keyframes, sizes). Runs in a thread."""
+        try:
+            audio = probe_packets(self.path, "a:0", ffprobe) if self.info.has_audio else []
+            video = probe_packets(self.path, "V:0", ffprobe)
+        except ProbeError as exc:
+            self.scan_error = str(exc)
+            log.warning("Packet scan of %s failed: %s", self.info.name, exc)
+            return
+        self.audio_packets = audio
+        self.video_packets = video
+        log.info("Scanned %s: %d keyframes", self.info.name, sum(p.key for p in video))
+
+    @property
+    def copy_ext(self) -> str:
+        """Extension for the Original card: the source's own container if known."""
+        ext = self.path.suffix.lower()
+        return ext if ext in MEDIA_TYPES else ".mkv"
 
 
 @dataclass
@@ -74,6 +112,7 @@ class AppState:
     out_dir: Path
     uploads: dict[str, Upload] = field(default_factory=dict)
     jobs: dict[str, EncodeJob] = field(default_factory=dict)
+    stills: dict[str, Path] = field(default_factory=dict)
     ffmpeg: str = "ffmpeg"
     ffprobe: str = "ffprobe"
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -231,6 +270,71 @@ class Handler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.NOT_FOUND, "unknown job")
         return job
 
+    def _upload_for(self, file_id: object) -> Upload | None:
+        upload = self.app.uploads.get(str(file_id))
+        if upload is None:
+            self._error(HTTPStatus.NOT_FOUND, "file not found; drop it again")
+        return upload
+
+    @staticmethod
+    def _trim_from(data: dict, upload: Upload) -> Trim | None:
+        """Read in_s/out_s from a request. Neither means untrimmed.
+
+        Raises:
+            ValueError: If only one is given, or they don't make a valid trim.
+        """
+        if "in_s" not in data and "out_s" not in data:
+            return None
+        try:
+            in_s, out_s = float(data["in_s"]), float(data["out_s"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("in_s and out_s must both be numbers") from exc
+        return make_trim(in_s, out_s, upload.info.duration_s)
+
+    @staticmethod
+    def _time_from(value: object, upload: Upload) -> float:
+        """Read a frame time; it must fall inside the video.
+
+        Raises:
+            ValueError: If it isn't a number inside [0, duration).
+        """
+        try:
+            t = float(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError) as exc:
+            raise ValueError("t must be a number") from exc
+        if not 0 <= t < upload.info.duration_s:
+            raise ValueError("t is outside the video")
+        return t
+
+    @staticmethod
+    def _original(upload: Upload, trim: Trim | None) -> dict | None:
+        """The Original card's figures for a trim; None when untrimmed."""
+        if trim is None:
+            return None
+        if upload.video_packets is None:
+            return {"ready": False, "error": upload.scan_error, "ext": upload.copy_ext}
+        start = snap_to_keyframe([p.pts for p in upload.video_packets if p.key], trim.in_s)
+        est = copy_bytes([upload.video_packets, upload.audio_packets], start, trim.out_s)
+        size = upload.info.size_bytes
+        return {"ready": True, "ext": upload.copy_ext, "start_s": start,
+                "snap_s": round(trim.in_s - start, 6), "est_bytes": est,
+                "est_ratio": round(est / size, 4) if size > 0 else 0.0}
+
+    def _run_ffmpeg(self, args: list[str], timeout: float) -> bytes:
+        """Run a short ffmpeg command, returning stdout.
+
+        Raises:
+            RuntimeError: If it fails, times out, or can't start.
+        """
+        try:
+            result = subprocess.run(args, capture_output=True, timeout=timeout,
+                                    stdin=subprocess.DEVNULL, creationflags=NO_WINDOW)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(f"ffmpeg failed to run: {exc}") from exc
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.decode("utf-8", "replace").strip() or "ffmpeg failed")
+        return result.stdout
+
     # --- dispatch -----------------------------------------------------------
 
     def do_GET(self) -> None:  # noqa: N802
@@ -252,6 +356,10 @@ class Handler(BaseHTTPRequestHandler):
             if job:
                 self._download(job)
             return None
+        if len(parts) == 3 and parts[:2] == ["api", "media"]:
+            return self._media(parts[2])
+        if len(parts) == 3 and parts[:2] == ["api", "frame"]:
+            return self._frame(parts[2])
         return self._error(HTTPStatus.NOT_FOUND, "not found")
 
     def do_POST(self) -> None:  # noqa: N802
@@ -263,6 +371,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._upload()
         if path == "/api/encode":
             return self._encode()
+        if path == "/api/plans":
+            return self._plans()
+        if path == "/api/still":
+            return self._still()
         if len(parts) == 4 and parts[:2] == ["api", "job"]:
             job = self._job_from_path(parts)
             if job is None:
@@ -271,7 +383,14 @@ class Handler(BaseHTTPRequestHandler):
                 job.cancel()
                 return self._send_json(HTTPStatus.OK, {"ok": True})
             if parts[3] == "reveal":
-                return self._reveal(job)
+                if job.state != "done":
+                    return self._error(HTTPStatus.CONFLICT, "output not available")
+                return self._reveal(job.dst)
+        if len(parts) == 4 and parts[:2] == ["api", "still"] and parts[3] == "reveal":
+            still = self.app.stills.get(parts[2])
+            if still is None:
+                return self._error(HTTPStatus.NOT_FOUND, "unknown still")
+            return self._reveal(still)
         return self._error(HTTPStatus.NOT_FOUND, "not found")
 
     # --- handlers -----------------------------------------------------------
@@ -328,9 +447,12 @@ class Handler(BaseHTTPRequestHandler):
             log.error("Upload of %s rejected: %s", name, exc)
             return self._error(HTTPStatus.UNPROCESSABLE_ENTITY, str(exc))
 
+        upload = Upload(dest, info)
         with self.app.lock:
-            self.app.uploads[file_id] = Upload(dest, info)
+            self.app.uploads[file_id] = upload
         log.info("Probed %s: %dx%d %.2ffps %.1fs", name, info.width, info.height, info.fps, info.duration_s)
+        threading.Thread(target=upload.scan, args=(self.app.ffprobe,), name=f"scan-{file_id}",
+                         daemon=True).start()
         return self._send_json(HTTPStatus.OK, {
             "source": info.to_dict(),
             "plans": [p.to_dict() for p in plans_for(info)],
@@ -342,37 +464,190 @@ class Handler(BaseHTTPRequestHandler):
             data = self._read_json()
         except (ValueError, json.JSONDecodeError) as exc:
             return self._error(HTTPStatus.BAD_REQUEST, str(exc))
-        preset = PRESETS_BY_ID.get(str(data.get("preset_id")))
-        if preset is None:
+        preset_id = str(data.get("preset_id"))
+        original = preset_id == "original"
+        preset = PRESETS_BY_ID.get(preset_id)
+        if preset is None and not original:
             return self._error(HTTPStatus.BAD_REQUEST, "unknown preset")
 
         with self.app.lock:
             # Look up under the lock: a new upload deletes the old sources (under it too).
-            upload = self.app.uploads.get(str(data.get("file_id")))
+            upload = self._upload_for(data.get("file_id"))
             if upload is None:
-                return self._error(HTTPStatus.NOT_FOUND, "file not found; drop it again")
+                return None
+            try:
+                trim = self._trim_from(data, upload)
+            except ValueError as exc:
+                return self._error(HTTPStatus.BAD_REQUEST, str(exc))
             if self.app.active_job():
                 return self._error(HTTPStatus.CONFLICT, "an encode is already running")
+
+            stem = safe_stem(upload.info.name)
+            if original:
+                if trim is None:
+                    return self._error(HTTPStatus.BAD_REQUEST, "Original needs a trim")
+                orig = self._original(upload, trim)
+                if not orig["ready"]:
+                    if orig["error"]:
+                        return self._error(HTTPStatus.UNPROCESSABLE_ENTITY, orig["error"])
+                    return self._error(HTTPStatus.CONFLICT, "still reading keyframes; try again in a moment")
+                start = orig["start_s"]
+                # Named for what the file holds: it starts at the keyframe.
+                name, suffix = output_stem(stem, "original", Trim(start, trim.out_s)), orig["ext"]
+            else:
+                name, suffix = output_stem(stem, preset.id, trim), ".mp4"
             try:
                 self.app.out_dir.mkdir(parents=True, exist_ok=True)
-                dst = unique_path(self.app.out_dir, f"{safe_stem(upload.info.name)}_{preset.id}", ".mp4")
+                dst = unique_path(self.app.out_dir, name, suffix)
                 dst.touch()  # reserve the name so a quick second job can't pick it
             except OSError as exc:
                 log.error("Cannot write to output folder %s: %s", self.app.out_dir, exc)
                 return self._error(HTTPStatus.INTERNAL_SERVER_ERROR,
                                    f"cannot write to output folder {self.app.out_dir}: {exc}")
-            job = EncodeJob(secrets.token_hex(4), upload.path, dst, plan_for(upload.info, preset),
-                            upload.info.duration_s, ffmpeg=self.app.ffmpeg)
+            job_id, ff = secrets.token_hex(4), self.app.ffmpeg
+            if original:
+                plan = CopyPlan("original", orig["est_bytes"], orig["snap_s"])
+                job = EncodeJob(job_id, upload.path, dst, plan, trim.out_s - start, ffmpeg=ff,
+                                args=build_copy_args(upload.path, dst, start, trim, ff))
+            elif trim is not None:
+                plan = plan_for(upload.info, preset, trim)
+                job = EncodeJob(job_id, upload.path, dst, plan, trim.duration_s, ffmpeg=ff,
+                                args=build_ffmpeg_args(upload.path, dst, plan, ff, trim))
+            else:  # untrimmed: exactly the v0.2.4 job
+                job = EncodeJob(job_id, upload.path, dst, plan_for(upload.info, preset),
+                                upload.info.duration_s, ffmpeg=ff)
             self.app.jobs[job.job_id] = job
             job.start()
         return self._send_json(HTTPStatus.OK, job.status())
 
-    def _reveal(self, job: EncodeJob) -> None:
-        if job.state != "done" or not job.dst.exists():
+    def _plans(self) -> None:
+        try:
+            data = self._read_json()
+        except (ValueError, json.JSONDecodeError) as exc:
+            return self._error(HTTPStatus.BAD_REQUEST, str(exc))
+        upload = self._upload_for(data.get("file_id"))
+        if upload is None:
+            return None
+        try:
+            trim = self._trim_from(data, upload)
+        except ValueError as exc:
+            return self._error(HTTPStatus.BAD_REQUEST, str(exc))
+        return self._send_json(HTTPStatus.OK, {
+            "plans": [p.to_dict() for p in plans_for(upload.info, trim)],
+            "trim": None if trim is None else {"in_s": trim.in_s, "out_s": trim.out_s},
+            "original": self._original(upload, trim),
+        })
+
+    def _still(self) -> None:
+        try:
+            data = self._read_json()
+        except (ValueError, json.JSONDecodeError) as exc:
+            return self._error(HTTPStatus.BAD_REQUEST, str(exc))
+        upload = self._upload_for(data.get("file_id"))
+        if upload is None:
+            return None
+        try:
+            t = self._time_from(data.get("t"), upload)
+        except ValueError as exc:
+            return self._error(HTTPStatus.BAD_REQUEST, str(exc))
+        name = f"{safe_stem(upload.info.name)}_still_{fmt_stamp(t)}"
+        try:
+            self.app.out_dir.mkdir(parents=True, exist_ok=True)
+            with self.app.lock:
+                dst = unique_path(self.app.out_dir, name, ".jpg")
+                dst.touch()
+        except OSError as exc:
+            log.error("Cannot write to output folder %s: %s", self.app.out_dir, exc)
+            return self._error(HTTPStatus.INTERNAL_SERVER_ERROR,
+                               f"cannot write to output folder {self.app.out_dir}: {exc}")
+        try:
+            self._run_ffmpeg(build_frame_args(upload.path, dst, t, self.app.ffmpeg), timeout=120)
+            size = dst.stat().st_size
+            if size == 0:
+                raise RuntimeError("no frame at that time")
+        except (RuntimeError, OSError) as exc:
+            dst.unlink(missing_ok=True)
+            log.error("Still at %.3fs of %s failed: %s", t, upload.info.name, exc)
+            return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, f"could not save the frame: {exc}")
+        still_id = secrets.token_hex(4)
+        self.app.stills[still_id] = dst
+        log.info("Saved still %s (%d bytes)", dst.name, size)
+        return self._send_json(HTTPStatus.OK, {"still_id": still_id, "name": dst.name,
+                                               "path": str(dst), "bytes": size})
+
+    def _media(self, file_id: str) -> None:
+        """Serve an upload to the player, honouring single byte ranges (seeking needs them)."""
+        upload = self._upload_for(file_id)
+        if upload is None:
+            return None
+        try:
+            fh = upload.path.open("rb")
+            size = upload.path.stat().st_size
+        except OSError:
+            return self._error(HTTPStatus.NOT_FOUND, "file not found; drop it again")
+        with fh:
+            try:
+                rng = parse_range(self.headers.get("Range"), size)
+            except RangeNotSatisfiable:
+                self.send_response(HTTPStatus.REQUESTED_RANGE_NOT_SATISFIABLE)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return None
+            start, end = rng or (0, size - 1)
+            self.send_response(HTTPStatus.PARTIAL_CONTENT if rng else HTTPStatus.OK)
+            self.send_header("Content-Type", MEDIA_TYPES.get(upload.path.suffix.lower(),
+                                                             "application/octet-stream"))
+            self.send_header("Content-Length", str(end - start + 1))
+            self.send_header("Accept-Ranges", "bytes")
+            if rng:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+            self.end_headers()
+            try:
+                fh.seek(start)
+                remaining = end - start + 1
+                while remaining > 0:
+                    chunk = fh.read(min(CHUNK, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+            except OSError:
+                # The player dropped the connection (seeked elsewhere, or has enough buffered).
+                self.close_connection = True
+        return None
+
+    def _frame(self, file_id: str) -> None:
+        """A scaled-down JPEG of the frame at ?t= (the fallback player)."""
+        upload = self._upload_for(file_id)
+        if upload is None:
+            return None
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        try:
+            t = self._time_from((query.get("t") or [None])[0], upload)
+        except ValueError as exc:
+            return self._error(HTTPStatus.BAD_REQUEST, str(exc))
+        args = build_frame_args(upload.path, Path("-"), t, self.app.ffmpeg, max_width=PREVIEW_WIDTH)
+        try:
+            body = self._run_ffmpeg(args, timeout=30)
+        except RuntimeError as exc:
+            return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+        if not body:
+            return self._error(HTTPStatus.NOT_FOUND, "no frame at that time")
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+        return None
+
+    def _reveal(self, path: Path) -> None:
+        if not path.exists():
             return self._error(HTTPStatus.CONFLICT, "output not available")
         try:
             # String form: explorer needs /select,"path" with the quotes inside.
-            subprocess.Popen(f'explorer /select,"{job.dst}"')
+            subprocess.Popen(f'explorer /select,"{path}"')
         except OSError as exc:
             return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
         return self._send_json(HTTPStatus.OK, {"ok": True})
@@ -387,7 +662,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
         with fh:
             self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Type", MEDIA_TYPES.get(job.dst.suffix.lower(),
+                                                             "application/octet-stream"))
             self.send_header("Content-Length", str(size))
             quoted = urllib.parse.quote(job.dst.name)
             self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quoted}")
