@@ -1,5 +1,31 @@
 # Release notes
 
+## v0.2.2 - "Make Up Your Mind"
+
+No new features. This one is about changing your mind halfway through an upload, and about
+Squishy being honest when an upload goes wrong.
+
+### Fixed
+
+- **Dropping a second video now replaces the first.** Before, both uploads kept going
+  and whichever finished last won, even if it was the one you'd given up on. It could wipe
+  out the video you actually wanted. Now the old upload is cancelled the moment you drop
+  the new one.
+- **A failed upload no longer leaves a loaded gun.** After a bad file, "Squish it" stayed
+  clickable for the *previous* video, which Squishy had already thrown away. Now the page
+  clears and waits for a new file.
+- **Error messages actually arrive.** Uploading from a second tab mid-encode, or with the
+  temp folder gone missing, used to show "Upload failed, is the console open?" (it was
+  open). Now you get the real reason.
+- **A tiny timing race is gone.** Starting a squish right as a new upload began could point
+  ffmpeg at a file that had just been deleted. You'd have needed millisecond reflexes, but
+  still.
+
+### Getting it
+
+Same as before: download **Source code (zip)** below, unzip, and double-click `Squishy.bat`.
+Upgrading? Copy your old `bin` folder into the new one to skip re-downloading ffmpeg.
+
 ## v0.2.1 - "Tidying Up After Itself"
 
 No new features. v0.2 got shipped, then it got audited, and the audit found a few places

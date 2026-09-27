@@ -173,6 +173,57 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("expected a JSON object")
         return data
 
+    def _receive(self, dest: Path | None, length: int) -> tuple[int, OSError | None]:
+        """Read the whole request body, saving it to dest if given.
+
+        The body is always read to the end, even after a write fails or when dest is
+        None: replying and closing with unread data makes the OS send a reset, and the
+        browser then reports a dead server instead of our error message.
+
+        Args:
+            dest: File to write the body to, or None to discard it.
+            length: Content-Length of the body.
+
+        Returns:
+            (bytes received, the first error opening or writing dest). Fewer bytes
+            than length means the browser went away (aborted or closed the tab); the
+            connection is then marked for closing and there is no one to answer.
+        """
+        fh, write_error = None, None
+        if dest is not None:
+            try:
+                fh = dest.open("wb")
+            except OSError as exc:
+                write_error = exc
+        received = 0
+        try:
+            while received < length:
+                try:
+                    chunk = self.rfile.read(min(CHUNK, length - received))
+                except OSError:
+                    chunk = b""
+                if not chunk:
+                    self.close_connection = True
+                    break
+                received += len(chunk)
+                if fh is not None:
+                    try:
+                        fh.write(chunk)
+                    except OSError as exc:
+                        write_error = exc
+                        try:
+                            fh.close()
+                        except OSError:
+                            pass  # already failing; the first error is the one to report
+                        fh = None
+        finally:
+            if fh is not None:
+                try:
+                    fh.close()
+                except OSError as exc:
+                    write_error = write_error or exc
+        return received, write_error
+
     def _job_from_path(self, parts: list[str]) -> EncodeJob | None:
         job = self.app.jobs.get(parts[2]) if len(parts) >= 3 else None
         if job is None:
@@ -248,30 +299,32 @@ class Handler(BaseHTTPRequestHandler):
         name = urllib.parse.unquote(self.headers.get("X-Filename") or "video")
 
         with self.app.lock:
-            if self.app.active_job():
-                # Body is unread; close so the client is not left hanging.
-                self.close_connection = True
-                return self._error(HTTPStatus.CONFLICT, "an encode is running; wait or cancel it first")
-            self.app.drop_uploads()
+            busy = self.app.active_job() is not None
+            if not busy:
+                self.app.drop_uploads()
+        if busy:
+            if self._receive(None, length)[0] < length:
+                return None
+            return self._error(HTTPStatus.CONFLICT, "an encode is running; wait or cancel it first")
 
         file_id = secrets.token_hex(6)
         suffix = re.sub(r"[^\w.]", "", Path(name).suffix)[:10] or ".bin"
         dest = self.app.temp_dir / f"{file_id}{suffix}"
         log.info("Receiving %s (%.1f MB)", name, length / 1e6)
+        received, write_error = self._receive(dest, length)
+        if received < length:
+            dest.unlink(missing_ok=True)
+            log.info("Upload of %s abandoned by the browser at %.1f MB", name, received / 1e6)
+            return None
+        if write_error is not None:
+            dest.unlink(missing_ok=True)
+            log.error("Could not save upload of %s: %s", name, write_error)
+            return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, f"could not save the upload: {write_error}")
         try:
-            remaining = length
-            with dest.open("wb") as fh:
-                while remaining > 0:
-                    chunk = self.rfile.read(min(CHUNK, remaining))
-                    if not chunk:
-                        raise OSError("client disconnected mid-upload")
-                    fh.write(chunk)
-                    remaining -= len(chunk)
             info = probe_file(dest, file_id=file_id, name=name, ffprobe=self.app.ffprobe)
         except (OSError, ProbeError) as exc:
             dest.unlink(missing_ok=True)
             log.error("Upload of %s rejected: %s", name, exc)
-            self.close_connection = True
             return self._error(HTTPStatus.UNPROCESSABLE_ENTITY, str(exc))
 
         with self.app.lock:
@@ -288,14 +341,15 @@ class Handler(BaseHTTPRequestHandler):
             data = self._read_json()
         except (ValueError, json.JSONDecodeError) as exc:
             return self._error(HTTPStatus.BAD_REQUEST, str(exc))
-        upload = self.app.uploads.get(str(data.get("file_id")))
         preset = PRESETS_BY_ID.get(str(data.get("preset_id")))
-        if upload is None:
-            return self._error(HTTPStatus.NOT_FOUND, "file not found; drop it again")
         if preset is None:
             return self._error(HTTPStatus.BAD_REQUEST, "unknown preset")
 
         with self.app.lock:
+            # Look up under the lock: a new upload deletes the old sources (under it too).
+            upload = self.app.uploads.get(str(data.get("file_id")))
+            if upload is None:
+                return self._error(HTTPStatus.NOT_FOUND, "file not found; drop it again")
             if self.app.active_job():
                 return self._error(HTTPStatus.CONFLICT, "an encode is already running")
             try:

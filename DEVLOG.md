@@ -4,6 +4,43 @@ Newest entries first. Decisions, rationale, and measured results; not a changelo
 
 ---
 
+## 2026-09-26 - v0.2.2: upload-flow fixes (audit findings 5, 8, 9, 10)
+
+v0.2.2. 63 tests pass (+4 in `test_server.py`), and 18/18
+server + integration tests pass with `bin/` on PATH (the round-trip skips without it).
+Each finding was reproduced before the fix and checked after it.
+
+- **9. Errors sent before the body is read now arrive.** Before: an upload during an encode
+  (second tab) and an upload into a vanished temp dir both got `ConnectionAbortedError`, so
+  the browser said "Upload failed / is the console open?". Cause: replying and closing with
+  unread body makes Windows send a reset. `Handler._receive()` now always reads the body to
+  the end, saving it if it can and discarding it otherwise, and returns `(received, write_error)`.
+  The busy upload drains and gets its 409. A write failure (temp gone, disk full) drains and
+  gets a **500** "could not save the upload" (not 422: it's our fault, not the file's).
+  A short body means the browser left: delete the partial file and send nothing.
+  Cost, accepted: a 409 for a multi-GB file means reading it all over loopback first.
+- **10. `_encode` looks up the upload under the lock.** Before: a test holding the lock
+  while an upload deleted the source got a 200 and a job started on a missing file.
+  After: 404 "drop it again", no job.
+- **5. A new drop aborts the upload in flight** (`state.xhr`, plus a stale-handler guard).
+  Before, in the browser pane: 300 MB junk dropped, then a real clip 30 ms later. The clip
+  loaded, then junk's late 422 wiped it out ("last to finish wins"). After: the clip stays
+  loaded and encodes. `loaded()` also clears any leftover poll interval, as a backstop.
+- **8. A failed upload forgets the old file.** Before: after a 422, "Squish it" stayed
+  enabled for a source the server had already deleted. After: `forget()` clears the source,
+  cards and results and disables the button. The headline is "Could not read that file"
+  only for a 422 and "Upload failed" otherwise.
+
+Not exercised from the browser: the server's abandoned-mid-body path. Chrome aborted a
+1.5 GB in-memory Blob before sending a byte, so the raw-socket test
+`test_upload_abandoned_mid_body_leaves_no_temp_file` stands in for it.
+
+Still open from the audit: 6 (shared temp dir wiped by a second instance), 7 (cover art
+mapped as video), 11 (`HTTPException` skips the download fallback). New, minor: two tabs
+uploading at once can leave the earlier-started file in temp until the next upload or exit.
+
+---
+
 ## 2026-09-24 - v0.2.1: release smoke test, console fixes, robustness audit
 
 Headless follow-up (user on phone). 59 tests pass: +4 `test_launch.py`, +1 `test_lifetime.py`, +2 `test_server.py`.

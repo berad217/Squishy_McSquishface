@@ -145,3 +145,73 @@ def test_busy_port_is_refused_even_if_owner_allows_reuse(tmp_path):
             SquishyServer(("127.0.0.1", squatter.getsockname()[1]), app)
     finally:
         squatter.close()
+
+
+class _BusyJob:
+    """Stands in for a running EncodeJob: active_job() only looks at .active."""
+
+    active = True
+
+    def cancel(self):
+        self.active = False
+
+    def wait(self, timeout=None):
+        return True
+
+
+def test_upload_during_encode_gets_the_409_not_a_reset(server):
+    # The body is unread when the 409 goes out. Closing on unread data sends an RST,
+    # and the browser reports "Upload failed" instead of the reason.
+    server.app.jobs["busy"] = _BusyJob()
+    status, data = _req(server, "POST", "/api/upload", body=b"\0" * (32 * 1024 * 1024),
+                        headers={"X-Filename": "second-tab.mp4"})
+    assert status == 409
+    assert "encode is running" in json.loads(data)["error"]
+    assert not any(server.app.temp_dir.iterdir())
+
+
+def test_unwritable_temp_gets_a_500_not_a_reset(server):
+    shutil.rmtree(server.app.temp_dir)  # e.g. a temp cleaner ran while Squishy was open
+    status, data = _req(server, "POST", "/api/upload", body=b"\0" * (32 * 1024 * 1024),
+                        headers={"X-Filename": "clip.mp4"})
+    assert status == 500
+    assert "error" in json.loads(data)
+
+
+def test_encode_rechecks_the_upload_under_the_lock(server, tmp_path):
+    # An upload that starts while /api/encode waits on the lock deletes the source.
+    # The encode must see that and 404, not start ffmpeg on a missing file.
+    from squishy.presets import SourceInfo
+    from squishy.server import Upload
+
+    src = tmp_path / "clip.mp4"
+    src.write_bytes(b"x")
+    server.app.uploads["f1"] = Upload(src, SourceInfo("f1", "clip.mp4", 1, 2.0, 640, 360, 30.0, False))
+    result = {}
+    with server.app.lock:
+        t = threading.Thread(target=lambda: result.update(r=_req(
+            server, "POST", "/api/encode", body={"file_id": "f1", "preset_id": "heavy"})))
+        t.start()
+        time.sleep(0.5)  # let the request reach the lock
+        server.app.drop_uploads()
+    t.join(30)
+    assert result["r"][0] == 404, result
+    assert not server.app.jobs
+
+
+def test_upload_abandoned_mid_body_leaves_no_temp_file(server):
+    # The page aborts the old upload when a new file is dropped.
+    port = server.server_address[1]
+    with socket.create_connection(("127.0.0.1", port)) as s:
+        s.sendall(f"POST /api/upload HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                  f"X-Filename: big.mp4\r\nContent-Length: {10 * 1024 * 1024}\r\n\r\n".encode())
+        s.sendall(b"\0" * (1024 * 1024))
+        deadline = time.monotonic() + 5
+        while not any(server.app.temp_dir.iterdir()) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert any(server.app.temp_dir.iterdir())  # it was receiving
+    deadline = time.monotonic() + 5
+    while any(server.app.temp_dir.iterdir()) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not any(server.app.temp_dir.iterdir())
+    assert not server.app.uploads
