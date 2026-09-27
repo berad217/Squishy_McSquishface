@@ -4,6 +4,45 @@ Newest entries first. Decisions, rationale, and measured results; not a changelo
 
 ---
 
+## 2026-09-27 - Spike: sample-based size estimate (Parking Lot)
+
+Question: does encoding a few short chunks predict the actual size well enough, cheaply
+enough, to be worth building? Throwaway script, not in the repo. The reference clip now
+lives in `samples/` (gitignored); full encodes reproduce the v0.1 table.
+
+Method: 3 chunks centred at 1/6, 3/6, 5/6 of the clip. One ffmpeg per chunk decodes once and
+`split`s to all four presets (same x264 settings as the real encode, raw `.h264` out).
+Predicted video rate = chunk bytes / chunk time, optionally clamped at the preset's maxrate
+(each chunk starts with a 90%-full VBV buffer, so it can burst over the cap). Size =
+rate * duration + audio, +1% container.
+
+| Preset  | Actual   | Ceiling (now)  | 3 x 2 s, clamped | 3 x 4 s, clamped |
+|---------|----------|----------------|------------------|------------------|
+| Light   | 18.7 MB  | 32.3 (+73%)    | 25.2 (+35%)      | 21.4 (+14%)      |
+| Medium  | 12.1 MB  | 14.4 (+19%)    | 13.6 (+13%)      | 13.6 (+13%)      |
+| Heavy   | 5.2 MB   | 6.3 (+23%)     | 6.0 (+16%)       | 5.5 (+6%)        |
+| Extreme | 2.3 MB   | 2.6 (+14%)     | 2.5 (+8%)        | 2.5 (+8%)        |
+
+Cost: 3 x 2 s took 9.8 s, 3 x 4 s took 15.2 s, against 17.8 s for the Medium full encode
+(54.7 s for all four).
+
+- **Chunks bias high,** every preset, every run: a keyframe and a full VBV buffer per chunk.
+  Longer chunks shrink it. Without the clamp, 2 s chunks were +24-34%.
+- **Chunks vary a lot:** Light's three 4 s chunks came in at 4.7, 8.7 and 3.3 Mbps. Three
+  samples can land on or miss the hard part of a clip.
+- **Only Light gains much.** It is the one preset whose ceiling is badly loose (CRF, not the
+  cap, decides its size). The other three are already within about 20% and sampling roughly
+  halves that.
+- **Economics run the wrong way.** On a 31 s clip, 4 s sampling costs 85% of a Medium encode.
+  It gets cheap only on long clips, where 3 x 4 s covers a few percent of the content and
+  the variance above gets worse. That case is unmeasured (one clip).
+
+**Decision (user): not building it.** The real gain is on Light alone, and on clips of this
+length it costs nearly a full encode. Worth revisiting only if long captures (minutes)
+become routine; re-run this measurement on one first.
+
+---
+
 ## 2026-09-26 - v0.2.4: version-aware handoff to a running Squishy
 
 82 tests pass (+13 `test_launch.py`; the ping test also checks the version). Fixes the open

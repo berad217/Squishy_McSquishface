@@ -197,6 +197,7 @@ All presets: `libx264 -preset slow -crf 23 -bufsize 2*maxrate -pix_fmt yuv420p`,
 - **Custom slider (resolution + bitrate):** presets first; add if the four feel too coarse.
 - **"Encode all presets" comparison:** useful for learning what looks acceptable; costs 4x time.
 - **Sample-based estimate:** encode 3 x 2 s chunks to predict the *actual* size, not just
-  the ceiling.
+  the ceiling. *Spiked 2026-09-27, shelved:* only Light gains much, at about 85% of a
+  Medium encode's time on a 31 s clip. Numbers and revisit condition in the DEVLOG.
 - **Batch queue:** drop a folder of clips.
 - **NVENC option:** much faster, somewhat worse quality per bit.

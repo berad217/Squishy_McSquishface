@@ -20,6 +20,7 @@ Python stdlib + ffmpeg. Single user, Windows, localhost only.
 | `squishy/workdir.py` | Per-instance temp folder + lock; startup sweeps only dead instances' folders |
 | `squishy/static/index.html` | Whole UI: inline CSS + vanilla JS, no build step |
 | `tests/` | pytest; `test_integration.py` and `test_server.py` run real ffmpeg |
+| `samples/` | Gitignored. The reference clip (UE5 4K60, 31 s) for manual checks; may be absent on a fresh clone |
 
 ## Commands
 
