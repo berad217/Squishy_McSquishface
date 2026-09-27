@@ -146,19 +146,28 @@ class Packet:
 
 
 def parse_packets(text: str) -> list[Packet]:
-    """Parse `ffprobe -show_entries packet=pts_time,size,flags -of csv=p=0:nk=0` output.
+    """Parse `ffprobe -show_entries packet=pts_time,size,flags:format=start_time
+    -of csv=p=0:nk=0` output.
 
-    Packets without a timestamp are skipped.
+    Times are made relative to the file's start_time, the timeline ffmpeg's -ss uses
+    (ffprobe prints absolute ones; they differ for files that don't start at 0, e.g.
+    MPEG-TS). Packets without a timestamp are skipped.
     """
-    out = []
+    rows, start = [], 0.0
     for line in text.splitlines():
         fields = dict(kv.split("=", 1) for kv in line.strip().split(",") if "=" in kv)
+        if "start_time" in fields:
+            try:
+                start = float(fields["start_time"])
+            except ValueError:
+                pass  # 'N/A': treat as 0
+            continue
         try:
-            out.append(Packet(float(fields["pts_time"]), int(fields["size"]),
-                              fields.get("flags", "").startswith("K")))
+            rows.append((float(fields["pts_time"]), int(fields["size"]),
+                         fields.get("flags", "").startswith("K")))
         except (KeyError, ValueError):
             continue
-    return out
+    return [Packet(round(pts - start, 6), size, key) for pts, size, key in rows]
 
 
 def copy_bytes(streams: Iterable[Sequence[Packet]], start_s: float, end_s: float) -> int:

@@ -190,6 +190,14 @@ def test_parse_packets():
     assert pk[0].size == 1000
 
 
+def test_parse_packets_relative_to_file_start():
+    # An MPEG-TS style file starting at 1.4 s: -ss 0 means its first packet.
+    pk = parse_packets("pts_time=1.400000,size=5,flags=K__\nstart_time=1.400000\n"
+                       "pts_time=1.433333,size=5,flags=___\n")
+    assert [p.pts for p in pk] == [0.0, 0.033333]
+    assert parse_packets("start_time=N/A\npts_time=2.0,size=1,flags=K__\n")[0].pts == 2.0
+
+
 def test_copy_bytes_counts_range_only():
     pk = parse_packets(PACKETS)
     # [0.0, 0.04): three packets; x1.01 container overhead, like the ceilings.

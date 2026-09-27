@@ -9,6 +9,7 @@ from fractions import Fraction
 from pathlib import Path
 
 from .presets import SourceInfo
+from .trim import Packet, parse_packets
 
 log = logging.getLogger(__name__)
 
@@ -167,3 +168,31 @@ def probe_file(path: Path, *, file_id: str, name: str, ffprobe: str = "ffprobe")
     except json.JSONDecodeError as exc:
         raise ProbeError(f"ffprobe returned invalid JSON: {exc}") from exc
     return parse_probe(data, file_id=file_id, name=name, size_bytes=path.stat().st_size)
+
+
+def probe_packets(path: Path, streams: str, ffprobe: str = "ffprobe") -> list[Packet]:
+    """List one stream's packets (time, size, keyframe flag). Reads, does not decode.
+
+    Args:
+        path: Media file.
+        streams: ffprobe stream specifier, e.g. 'V:0' or 'a:0'.
+        ffprobe: Path to the ffprobe executable.
+
+    Returns:
+        The packets; empty if the stream doesn't exist.
+
+    Raises:
+        ProbeError: If ffprobe can't run or read the file.
+    """
+    cmd = [ffprobe, "-v", "error", "-select_streams", streams,
+           "-show_entries", "packet=pts_time,size,flags:format=start_time",
+           "-of", "csv=p=0:nk=0", str(path)]
+    try:
+        # Timeout scales with nothing we know up front; long files take a while to read.
+        result = subprocess.run(cmd, capture_output=True, timeout=600, creationflags=NO_WINDOW,
+                                check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ProbeError(f"ffprobe failed to run: {exc}") from exc
+    if result.returncode != 0:
+        raise ProbeError(result.stderr.decode("utf-8", "replace").strip() or "packet scan failed")
+    return parse_packets(result.stdout.decode("ascii", "replace"))
