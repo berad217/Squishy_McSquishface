@@ -200,4 +200,6 @@ All presets: `libx264 -preset slow -crf 23 -bufsize 2*maxrate -pix_fmt yuv420p`,
   the ceiling. *Spiked 2026-09-27, shelved:* only Light gains much, at about 85% of a
   Medium encode's time on a 31 s clip. Numbers and revisit condition in the DEVLOG.
 - **Batch queue:** drop a folder of clips.
-- **NVENC option:** much faster, somewhat worse quality per bit.
+- **NVENC option:** much faster, somewhat worse quality per bit. *Spiked 2026-09-27, shelved:*
+  under the presets' caps it scored 2-6 VMAF lower (Light: +29% size at matched quality) and
+  was at most 1.6x faster. Numbers in the DEVLOG.

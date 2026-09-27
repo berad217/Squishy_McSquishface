@@ -4,6 +4,39 @@ Newest entries first. Decisions, rationale, and measured results; not a changelo
 
 ---
 
+## 2026-09-27 - Spike: NVENC vs x264 (Parking Lot)
+
+Question: is `h264_nvenc` (RTX 3090) fast enough, at acceptable quality per byte, to offer?
+Throwaway script, reference clip, same resolution / fps / VBV cap as each preset. NVENC:
+`-preset p7 -tune hq -rc vbr -cq N -b:v 0`, 32-frame lookahead, spatial + temporal AQ,
+3 B-frames as references. CQ swept 19-31. H.264 only (HEVC/AV1 would break playback on
+some of the places the output goes). Quality is VMAF (every 4th frame) against the source
+put through the same fps/scale filters.
+
+| Preset  | x264 slow: size / VMAF / time | NVENC, best CQ: size / VMAF / time | Verdict |
+|---------|-------------------------------|------------------------------------|---------|
+| Light   | 18.7 MB / 92.3 / 19.6 s       | 24.1 MB at matched VMAF / 11.8 s   | +29% size |
+| Medium  | 12.1 MB / 87.5 / 17.8 s       | 11.6-12.6 MB / 84.2-84.6 / 11.3 s  | -3 VMAF |
+| Heavy   | 5.2 MB / 90.6 / 9.2 s         | 5.0-5.5 MB / 87.9-88.3 / 7.7 s     | -2.3 VMAF |
+| Extreme | 2.3 MB / 86.6 / 8.1 s         | 2.2-2.3 MB / 80.8-82.3 / 8.6 s     | -4 to -6 VMAF |
+
+- **The cap binds NVENC at every CQ** for Medium, Heavy and Extreme: size and VMAF barely
+  move across the sweep. CQ itself works (uncapped Medium: 91.8 MB at CQ 19, 18.6 MB at
+  CQ 31). So those rows are "same bit budget, which looks better", and x264 wins every one.
+  Matching x264's quality would mean spending past the cap, which breaks the ceiling.
+- **The speed win is small here.** It is 1.6x at the 1080p presets and nothing at the low
+  ones, because CPU decoding of 4K60 and the scale dominate. GPU decode + `scale_cuda`
+  might change that; unmeasured. On a 31 s clip the saving is 1-8 s per encode.
+- **Gotcha, for any future VMAF work:** the source is VFR (frame gaps 16.3-23.5 ms), and
+  encodes come out CFR. libvmaf pairs frames by timestamp, so it scored Light 57.6 until
+  both inputs were renumbered by frame index (`settb=1/1000,setpts=N`), giving 92.3.
+
+**Decision (user): not building it.** Inside Squishy's caps x264 gives better quality at every
+preset, and the time saved is a few seconds per encode. Revisit only if GPU decode + scale
+turns out several times faster *and* someone wants a "fast, slightly worse" mode.
+
+---
+
 ## 2026-09-27 - Spike: sample-based size estimate (Parking Lot)
 
 Question: does encoding a few short chunks predict the actual size well enough, cheaply
