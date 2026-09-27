@@ -1,5 +1,23 @@
 # Release notes
 
+## v0.2.4 - "Wait, Which One Is This?"
+
+One fix, found while testing v0.2.3 for real.
+
+### Fixed
+
+- **Upgrading while the old Squishy is open now tells you so.** Before, double-clicking the
+  new version while the old one was still running just opened the *old* one, and nothing
+  told you. It looked like the upgrade had done nothing. Now the new version says "An older
+  Squishy is already running. Close its window, then start this one again." If the one
+  running is the same version or newer, it opens that, same as before.
+
+### Getting it
+
+Download **Source code (zip)** below and unzip it. **Close the old Squishy's black window
+first,** then double-click `Squishy.bat`. Copy your old `bin` folder into the new one to skip
+re-downloading ffmpeg.
+
 ## v0.2.3 - "Last of the Audit"
 
 No new features. This clears the last three problems from the v0.2.1 audit. All three are

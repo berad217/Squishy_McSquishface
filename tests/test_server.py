@@ -59,6 +59,8 @@ def _req(srv, method, path, body=None, headers=None):
 def test_ping_and_index(server):
     status, data = _req(server, "GET", "/api/ping")
     assert status == 200 and json.loads(data)["app"] == "squishy"
+    from squishy import __version__
+    assert json.loads(data)["version"] == __version__  # launch.py's handoff check reads this
     status, data = _req(server, "GET", "/")
     assert status == 200 and b"Squishy" in data
 

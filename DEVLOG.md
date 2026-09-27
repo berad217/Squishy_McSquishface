@@ -4,6 +4,60 @@ Newest entries first. Decisions, rationale, and measured results; not a changelo
 
 ---
 
+## 2026-09-26 - v0.2.4: version-aware handoff to a running Squishy
+
+82 tests pass (+13 `test_launch.py`; the ping test also checks the version). Fixes the open
+item from the desktop check below.
+
+- **`/api/ping` now returns `version`** (`squishy.__version__`, kept equal to pyproject by
+  `test_version_matches_pyproject`). `launch.py`'s `running_version()` reads it back as
+  "unknown" when a ping has no version (v0.2.3 and earlier), or None when whatever answers isn't Squishy.
+- **Decision (moderate confidence):** if the running copy is older or unknown, refuse. Log
+  "An older Squishy (...) is already running at URL. Close its window, then start this one
+  again.", exit 1 (the `.bat` pauses, so the message stays on screen) and don't open a browser.
+  If it's the same version or newer, open it as before (newer adds a note).
+  Rejected: starting beside the old one on a free port. v0.2.2 and earlier `rmtree` all of
+  `%TEMP%\squishy` on exit, which would take the new instance's uploads.
+  Rejected: an auto-quit endpoint. Too much for this; a message the user can act on is enough.
+- **Repro:** a v0.2.3 `git archive` copy on port 48210, then the new launcher on the same port.
+  Before: "already running; opening", exit 0. After: the refusal, exit 1. Through
+  `Squishy.bat` too: the message, "Press any key", exit 1.
+- README gained an "Upgrading?" line.
+
+---
+
+## 2026-09-26 - v0.2.3 checked on the real desktop
+
+The user downloaded the release zip, got SmartScreen's unsigned-app warning, clicked through,
+and double-clicked `Squishy.bat`. The browser opened.
+
+**Found: that first run never reached v0.2.3.** A dev instance started 2026-09-23 18:12 was
+still holding 48123. `already_running()` got a ping, so the new copy opened the browser to the
+old one and exited. The old process's Python was pre-v0.2.0, but it served the repo's current
+`index.html` (read from disk per request), so the page looked current. After the old process
+was stopped, a relaunch through the `.bat` (`py -3 launch.py`) came up as v0.2.3, with its
+`run-<id>` folder and lock.
+
+Against the real v0.2.3 instance (default port and output folder, ffmpeg from PATH, no `bin/`):
+- **Real clip**, 227 MiB 4K60 UE5 capture: upload 1.0 s. Medium: 12.1 MiB against a 14.4 MiB
+  ceiling (0.84), 18 s.
+- **Open folder:** Explorer opened `Videos\Squished` with the new file selected (seen with
+  computer use).
+- **Download:** 200, Content-Length matches the file, UTF-8 filename header correct.
+- The upload was driven over HTTP the way the page does it, not through the page: File
+  Explorer is granted click-only, so there's no drag, and the built-in browser pane never
+  hands the file picker off to a native dialog.
+
+**Still needs a human:** real drag-and-drop onto the page, and clicking the page's own
+Open folder / Download buttons.
+
+**Open (not fixed):** an older Squishy on the port silently wins the handoff, so a friend who
+upgrades while the old one is open gets the old version with no hint. Candidate fix: `/api/ping`
+returns the version, and `launch.py` warns on a mismatch ("an older Squishy (vX) is running;
+close its window first").
+
+---
+
 ## 2026-09-26 - v0.2.3: audit findings 6, 7, 11 (the audit list is now closed)
 
 71 tests pass (+5 `test_workdir.py`, +2 `test_tools.py`, +1 `test_integration.py`); the 2

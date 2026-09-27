@@ -37,6 +37,9 @@ Squishy offers to download it the first time you run it.
 To quit, close the black console window. To uninstall, delete the folder. Your squished videos
 stay in `Videos\Squished`.
 
+**Upgrading?** Close the old Squishy's console window first. If it's still open, the new one
+says so and stops, rather than quietly opening the old version.
+
 ### Things that look like bugs but aren't
 
 - **The actual file is smaller than the size shown.** The number is a ceiling ("up to"), not a

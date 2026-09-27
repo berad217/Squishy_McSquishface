@@ -24,6 +24,7 @@ import webbrowser
 from pathlib import Path
 from typing import TextIO
 
+from squishy import __version__
 from squishy.server import AppState, SquishyServer
 from squishy.tools import (BIN_DIR, FFMPEG_BYTES, FFMPEG_VERSION, DownloadError, Tools,
                            download_supported, download_tools, find_tools)
@@ -36,13 +37,32 @@ DEFAULT_OUT = Path.home() / "Videos" / "Squished"
 TEMP_ROOT = Path(tempfile.gettempdir()) / "squishy"
 
 
-def already_running(port: int) -> bool:
-    """Return True if a Squishy server already answers on this port."""
+def running_version(port: int) -> str | None:
+    """Ask whatever answers on this port whether it is Squishy, and which version.
+
+    Args:
+        port: Local port to ping.
+
+    Returns:
+        The running Squishy's version, "unknown" for one from before v0.2.4 (its ping
+        has no version), or None if nothing answers or it isn't Squishy.
+    """
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=1) as resp:
-            return json.load(resp).get("app") == "squishy"
+            data = json.load(resp)
     except (OSError, ValueError):
-        return False
+        return None
+    if not isinstance(data, dict) or data.get("app") != "squishy":
+        return None
+    return str(data.get("version") or "unknown")
+
+
+def version_key(version: str) -> tuple[int, ...]:
+    """Sortable form of "0.2.4"; anything unparseable ("unknown") sorts oldest."""
+    try:
+        return tuple(int(part) for part in version.split("."))
+    except ValueError:
+        return ()
 
 
 class ProgressLine:
@@ -167,9 +187,20 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     log.info("Using ffmpeg: %s", tools.ffmpeg)
 
-    if already_running(args.port):
+    running = running_version(args.port)
+    if running is not None:
         url = f"http://127.0.0.1:{args.port}/"
-        log.info("Squishy is already running; opening %s", url)
+        # Handing off to an older copy would look like the upgrade did nothing. Starting
+        # beside it isn't safe either: v0.2.2 and earlier wipe all of %TEMP%\squishy on exit.
+        if version_key(running) < version_key(__version__):
+            label = f"v{running}" if running != "unknown" else "from before v0.2.4"
+            log.error("An older Squishy (%s) is already running at %s. Close its window, "
+                      "then start this one (v%s) again.", label, url, __version__)
+            return 1
+        if running == __version__:
+            log.info("Squishy is already running; opening %s", url)
+        else:
+            log.info("A newer Squishy (v%s) is already running; opening that one: %s", running, url)
         if not args.no_browser:
             webbrowser.open(url)
         return 0

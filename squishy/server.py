@@ -17,6 +17,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import __version__
 from .encoder import EncodeJob
 from .presets import PRESETS_BY_ID, SourceInfo, plan_for, plans_for
 from .probe import ProbeError, probe_file
@@ -240,7 +241,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             return self._serve_index()
         if path == "/api/ping":
-            return self._send_json(HTTPStatus.OK, {"app": "squishy"})
+            return self._send_json(HTTPStatus.OK, {"app": "squishy", "version": __version__})
         if len(parts) == 3 and parts[:2] == ["api", "job"]:
             job = self._job_from_path(parts)
             if job:
