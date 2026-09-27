@@ -113,7 +113,8 @@ def build_ffmpeg_args(src: Path, dst: Path, plan: Plan, ffmpeg: str = "ffmpeg") 
     args = [
         ffmpeg, "-hide_banner", "-nostdin", "-y", "-loglevel", "error",
         "-i", str(src),
-        "-map", "0:v:0", "-map", "0:a:0?",
+        # V, not v: skip cover art / attached pictures, the same streams probe.py skips.
+        "-map", "0:V:0", "-map", "0:a:0?",
         "-vf", ",".join(filters),
         "-c:v", "libx264", "-preset", X264_PRESET, "-crf", str(X264_CRF),
         "-maxrate", f"{plan.video_kbps}k", "-bufsize", f"{plan.video_kbps * 2}k",

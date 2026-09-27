@@ -9,6 +9,7 @@ other platforms should use their package manager.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import logging
 import os
 import shutil
@@ -137,6 +138,8 @@ def _install_from(url: str, bin_dir: Path, sha256: str, progress: Progress | Non
         _extract(part, bin_dir)
     except OSError as exc:  # URLError and HTTPError are OSErrors
         raise DownloadError(str(exc)) from exc
+    except http.client.HTTPException as exc:  # e.g. IncompleteRead: not an OSError
+        raise DownloadError(f"broken response ({type(exc).__name__}: {exc})") from exc
     except zipfile.BadZipFile as exc:
         raise DownloadError(f"downloaded file is not a valid zip: {exc}") from exc
     finally:

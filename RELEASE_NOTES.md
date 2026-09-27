@@ -1,5 +1,27 @@
 # Release notes
 
+## v0.2.3 - "Last of the Audit"
+
+No new features. This clears the last three problems from the v0.2.1 audit. All three are
+rare, and all three were annoying when they did happen.
+
+### Fixed
+
+- **Two Squishy windows no longer sabotage each other.** If a second copy ended up running
+  (easy to do when something else is using Squishy's usual port), starting it deleted the
+  first one's video. So did quitting either one. Each copy now keeps its own scratch folder
+  and only tidies up after itself, or after copies that have crashed.
+- **Videos with cover art squish.** Some files keep a thumbnail image inside them. If
+  that image came first in the file, Squishy tried to squish the thumbnail instead of the
+  video, and failed. It now skips straight to the video.
+- **The backup ffmpeg download actually kicks in.** If the first download server sent back a
+  broken reply of a certain kind, Squishy gave up instead of trying the second server.
+
+### Getting it
+
+Same as before: download **Source code (zip)** below, unzip, and double-click `Squishy.bat`.
+Upgrading? Copy your old `bin` folder into the new one to skip re-downloading ffmpeg.
+
 ## v0.2.2 - "Make Up Your Mind"
 
 No new features. This one is about changing your mind halfway through an upload, and about

@@ -7,7 +7,9 @@ import hashlib
 import io
 import os
 import re
+import socket
 import subprocess
+import threading
 import zipfile
 
 import pytest
@@ -134,6 +136,37 @@ def test_all_sources_failing_reports_each(tmp_path):
         download_tools(tmp_path / "bin", urls=[a, b], sha256="0" * 64)
     assert str(info.value).count(";") == 1  # one failure per source
     assert list((tmp_path / "bin").iterdir()) == []
+
+
+# Broken responses that http.client reports as HTTPException, which is not an OSError.
+# (A short fixed-length body just reads short and fails the checksum; these don't get that far.)
+BROKEN_RESPONSES = {
+    "truncated chunked body": (b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+                               b"400\r\nPK" + bytes(8)),  # raised mid-read
+    "garbage status line": b"SSH-2.0-OpenSSH_9.6\r\n",  # raised inside urlopen
+}
+
+
+@pytest.mark.parametrize("raw", BROKEN_RESPONSES.values(), ids=BROKEN_RESPONSES.keys())
+def test_broken_http_response_falls_back_to_next_source(tmp_path, raw):
+    listener = socket.create_server(("127.0.0.1", 0))
+
+    def serve_once():
+        conn, _ = listener.accept()
+        with conn:
+            conn.recv(65536)
+            conn.sendall(raw)
+
+    threading.Thread(target=serve_once, daemon=True).start()
+    try:
+        good_url, sha = make_zip(tmp_path, GOOD)
+        bin_dir = tmp_path / "bin"
+        broken_url = f"http://127.0.0.1:{listener.getsockname()[1]}/x.zip"
+        download_tools(bin_dir, urls=[broken_url, good_url], sha256=sha)
+        assert (bin_dir / FF).read_bytes() == b"FFMPEG"
+        assert not (bin_dir / "ffmpeg-download.zip.part").exists()
+    finally:
+        listener.close()
 
 
 @pytest.mark.skipif(os.environ.get("SQUISHY_LIVE_DOWNLOAD") != "1" or os.name != "nt",

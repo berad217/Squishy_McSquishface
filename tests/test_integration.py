@@ -1,6 +1,8 @@
 """Real ffmpeg runs on generated clips. Skipped if ffmpeg is not on PATH."""
 
+import json
 import shutil
+import struct
 import subprocess
 from pathlib import Path
 
@@ -86,3 +88,50 @@ def test_bad_input_reports_error(tmp_path):
     job.wait(timeout=30)
     assert job.state == "error" and job.error
     assert not dst.exists()
+
+
+def _boxes(buf: bytes, start: int, end: int):
+    while start < end:
+        size, kind = struct.unpack(">I4s", buf[start:start + 8])
+        yield kind, buf[start:start + size]
+        start += size
+
+
+def _cover_art_first(tmp_path: Path) -> Path:
+    """An MP4 whose cover art (udta/covr) is stream 0, as when a tagger writes udta
+    before the traks. ffmpeg always writes it last, so move the box: same bytes, same
+    moov size, and with +faststart moov precedes mdat, so chunk offsets stay valid."""
+    video = _make_clip(tmp_path / "plain.mp4", 1, size="320x240", rate=30)
+    cover = tmp_path / "cover.png"
+    run = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"]
+    subprocess.run([*run, "-f", "lavfi", "-i", "color=red:s=200x200", "-frames:v", "1", str(cover)],
+                   check=True)
+    tagged = tmp_path / "tagged.mp4"
+    subprocess.run([*run, "-i", str(video), "-i", str(cover), "-map", "0", "-map", "1", "-c", "copy",
+                    "-disposition:v:1", "attached_pic", "-movflags", "+faststart", str(tagged)], check=True)
+    data = tagged.read_bytes()
+    out = b""
+    for kind, box in _boxes(data, 0, len(data)):
+        if kind == b"moov":
+            kids = list(_boxes(box, 8, len(box)))
+            udta = b"".join(b for k, b in kids if k == b"udta")
+            assert udta, "ffmpeg wrote no udta box"
+            rest = [b for k, b in kids if k != b"udta"]
+            box = box[:8] + rest[0] + udta + b"".join(rest[1:])  # mvhd stays first
+        out += box
+    path = tmp_path / "cover_first.mp4"
+    path.write_bytes(out)
+    return path
+
+
+def test_cover_art_first_encodes_the_real_video(tmp_path):
+    src = _cover_art_first(tmp_path)
+    streams = json.loads(subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "stream=codec_name:stream_disposition=attached_pic",
+         "-of", "json", str(src)], capture_output=True, text=True, check=True).stdout)["streams"]
+    assert streams[0]["disposition"]["attached_pic"] == 1  # the setup really puts cover art first
+    job, plan = _encode(src, tmp_path / "out.mp4", "light")
+    assert job.state == "done", job.error  # 0:v:0 picked the cover; the mp4 muxer refused it
+    out = _probe_out(job.dst)
+    assert (out.width, out.height) == (plan.out_width, plan.out_height)
+    assert out.duration_s == pytest.approx(1.0, abs=0.1)

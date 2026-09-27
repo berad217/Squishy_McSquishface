@@ -4,9 +4,37 @@ Newest entries first. Decisions, rationale, and measured results; not a changelo
 
 ---
 
-## 2026-09-26 - Per-instance temp folders (audit finding 6)
+## 2026-09-26 - v0.2.3: audit findings 6, 7, 11 (the audit list is now closed)
 
-Uncommitted, unreleased. 68 tests pass (+5 `test_workdir.py`).
+71 tests pass (+5 `test_workdir.py`, +2 `test_tools.py`, +1 `test_integration.py`); the 2
+skips are the opt-in live downloads. Each finding was reproduced before the fix and checked after it.
+
+### 7. Cover art first: the encode failed
+
+Probe skipped `attached_pic` streams, but the encoder mapped `0:v:0`, the first video
+stream *including* cover art. Fix: `-map 0:V:0`. Capital `V` is ffmpeg's specifier for
+video that isn't an attached picture, which is exactly probe's rule.
+- **The audit guessed the wrong symptom.** It isn't a frozen frame: ffmpeg carries the
+  `attached_pic` disposition onto the H.264 output, and the MP4 muxer refuses it ("Could not
+  find tag for codec h264"). The encode fails.
+- **Reaching it needs a specific file.** ffmpeg's muxers always write cover art last (MP4 `covr`,
+  MKV attachment), so no ffmpeg-made file triggers it. The MP4 *demuxer*, though, creates the
+  cover stream wherever `udta` sits in `moov`. A tagger that writes `udta` before the
+  traks therefore produces cover-first files. The repro moves the `udta` box to just
+  after `mvhd`: same bytes, and the chunk offsets stay valid under `+faststart`.
+  How common such taggers are: not checked.
+  `test_cover_art_first_encodes_the_real_video` builds that file; it fails on `0:v:0` with the muxer error.
+
+### 11. Broken HTTP responses skipped the download fallback
+
+`_install_from` caught only `OSError`. `http.client.HTTPException` isn't one, so it escaped
+`download_tools` without trying the next source. Now it's a `DownloadError`, so the next source gets tried.
+- A short *fixed-length* body never raised: `read(amt)` returns short and the checksum
+  catches it. That first repro passed on the unfixed code and was replaced. The escaping
+  cases are a truncated *chunked* body (`IncompleteRead` mid-read) and a non-HTTP reply
+  (raised inside `urlopen`). Both are tests, both failed before.
+
+### 6. Per-instance temp folders
 
 **Problem.** Every instance shared `%TEMP%\squishy`. Startup `rmtree`'d it, and so did shutdown,
 so one instance could delete another's uploads, in either direction. A second instance is
@@ -36,8 +64,9 @@ Also: backfilled the missing GitHub Release for v0.2.1 (the tag existed; v0.2.0 
 
 ## 2026-09-26 - v0.2.2: upload-flow fixes (audit findings 5, 8, 9, 10)
 
-v0.2.2. 63 tests pass (+4 in `test_server.py`), and 18/18
-server + integration tests pass with `bin/` on PATH (the round-trip skips without it).
+v0.2.2. 63 tests pass (+4 in `test_server.py`), including the ffmpeg round-trip.
+(Correction, v0.2.3: this entry first said the round-trip skips without `bin/` on PATH.
+It doesn't on this machine: Chocolatey's ffmpeg is on PATH. The 2 skips are the opt-in live downloads.)
 Each finding was reproduced before the fix and checked after it.
 
 - **9. Errors sent before the body is read now arrive.** Before: an upload during an encode

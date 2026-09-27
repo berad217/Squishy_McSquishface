@@ -1,6 +1,6 @@
 [project]
 name = "squishy-mcsquishface"
-version = "0.2.2"
+version = "0.2.3"
 description = "Drop a video, pick a compression level, get a smaller MP4."
 license = "MIT"
 requires-python = ">=3.11"
