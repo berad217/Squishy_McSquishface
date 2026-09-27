@@ -36,8 +36,11 @@ Squishy offers to download it the first time you run it.
    - **To keep only part of it,** drag the orange [ ] brackets under the timeline, or play to the
      right spot and click **Set start** / **Set end** (keys `I` / `O`; arrow keys step one
      frame, Shift+arrows one second). Scrubbed to the right spot first? Drag a bracket
-     toward it and the bracket snaps onto it. The sizes update as you go. An extra **Original** card
+     toward it and the bracket catches on it. The sizes update as you go. An extra **Original** card
      appears that cuts the clip without re-encoding at all.
+   - **The ticks under the timeline are keyframes,** the only places an Original can start
+     (see below). Ctrl+arrows jump between them. If the Original would start early,
+     **Start on keyframe** moves your start back to it, so every card starts on the same frame.
    - **Save frame** saves the frame you're looking at as a full-size JPEG.
 5. Your files go to **`Videos\Squished`**. Click **Open folder** to jump there. Trimmed clips
    and frames have their time range in the name, e.g. `clip_medium_5.200s-12.800s.mp4`.
@@ -57,8 +60,9 @@ says so and stops, rather than quietly opening the old version.
 - **MB here means the same as in Windows Explorer**, so the numbers match what Explorer shows.
 - **The Original card starts a little before your start point.** Copying without re-encoding
   can only start on a *keyframe* (a frame stored whole; the ones between are stored as
-  changes). The card says how early, usually well under a second. The squish levels start
-  exactly where you set.
+  changes). The card says how early: under a second for many cameras, but some recordings
+  (phone and chat-app videos, for example) have keyframes several seconds apart. The squish
+  levels start exactly where you set. Click **Start on keyframe** to make them all match.
 - **The preview is a still picture with no sound, and Play is greyed out.** Your browser
   can't play that kind of video, so Squishy shows frames from ffmpeg instead. Trimming and
   Save frame still work.

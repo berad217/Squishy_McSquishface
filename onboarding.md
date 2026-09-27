@@ -53,6 +53,7 @@ python launch.py --no-browser --out <scratch dir>
   (`requestVideoFrameCallback`), and every seek aims `SEEK_SLACK_S` (2 ms) before it, so
   ffmpeg lands on that frame even if the browser rounds. `requestVideoFrameCallback` only
   fires while the page is painting: in a hidden browser pane the time display freezes.
-  Test headless logic with `seeked` + `drawImage`, not rVFC.
+  Test headless logic with `seeked` + `drawImage`, not rVFC. The keyframe snap allows the
+  same 2 ms, so a start set on a keyframe from a slightly-low player time stays on it.
 - **Packet times are relative to the file's `start_time`,** the timeline `-ss` uses.
   ffprobe prints absolute ones; they differ for files that don't start at 0 (MPEG-TS).

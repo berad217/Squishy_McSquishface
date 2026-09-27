@@ -104,6 +104,7 @@ Squishy_McSquishface/
 | GET | `/api/job/<id>/download` | stream output file |
 | GET | `/api/media/<file_id>` | the upload, for the player (single-range `Range` -> 206) (v0.3) |
 | GET | `/api/frame/<file_id>?t=` | JPEG of the frame at t, max 960 wide (fallback player) (v0.3) |
+| GET | `/api/keyframes/<file_id>` | `{ready, error, keyframes: [s...]}` once the packet scan is done (v0.3) |
 | POST | `/api/plans` | `{file_id, in_s?, out_s?}` -> plans for the trim + the Original card (v0.3) |
 | POST | `/api/still` | `{file_id, t}` -> full-res JPEG in the output folder (v0.3) |
 | POST | `/api/still/<id>/reveal` | `explorer /select,<path>` (v0.3) |
@@ -211,6 +212,9 @@ Grilled 2026-09-27; the two load-bearing decisions are in the DEVLOG. Terms are 
     container. Its size is the packet total in range, not a ceiling (within 0.1% at
     real sizes). Keyframes and packet sizes come from an ffprobe packet scan run in the
     background after each upload.
+  - **Keyframes are visible** (added after the build, user request): ticks under the
+    timeline, Ctrl+arrows to jump between them, and a **Start on keyframe** button that
+    moves the in-point back to the Original's start, so every card starts on the same frame.
   - **Save frame**: ffmpeg extracts the displayed frame (by its presentation time) as a
     full-resolution JPEG (`-q:v 2`) into the output folder, `<stem>_still_<time>.jpg`.
   - Trimmed outputs are named `<stem>_<preset>_<in>-<out>.<ext>`, times like `5.200s` /
@@ -255,3 +259,6 @@ Grilled 2026-09-27; the two load-bearing decisions are in the DEVLOG. Terms are 
 - **NVENC option:** much faster, somewhat worse quality per bit. *Spiked 2026-09-27, shelved:*
   under the presets' caps it scored 2-6 VMAF lower (Light: +29% size at matched quality) and
   was at most 1.6x faster. Numbers in the DEVLOG.
+- **Brackets that catch on keyframes:** rejected for v0.3. With keyframes 0.5 s apart
+  (~14 px on the timeline) and an 8 px catch, nearly every drag would land on one, which
+  fights frame-exact trims for the presets. Revisit only as an opt-in (a held modifier key).

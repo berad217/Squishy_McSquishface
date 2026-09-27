@@ -6,7 +6,7 @@ Newest entries first. Decisions, rationale, and measured results; not a changelo
 
 ## 2026-09-27 - v0.3.0 built: trim, Original, Save frame
 
-161 tests pass (+79). Pure parts written test-first (`test_trim.py`, the v0.2.4 args pin);
+161 tests pass (+79) at the build; 164 after the fixes below. Pure parts written test-first (`test_trim.py`, the v0.2.4 args pin);
 `test_trim_integration.py` checks frame-exactness on a generated clip whose frames carry
 their own number as 8 black/white blocks, so every output frame traces to its source frame.
 
@@ -47,6 +47,36 @@ lanes to show alignment and take no clicks. Rejected: a taller playhead grabbed 
 bottom (still ambiguous to a first-time user) and hidden priority rules. Checked with real
 mouse input, with the playhead exactly on the end bracket: a top-lane drag moved only the
 playhead, and a bottom-lane drag moved only the bracket.
+
+**Third: the Original's keyframe was invisible.** The card said "starts X s early" but
+nothing showed where keyframes were. The user's WhatsApp test clip had 4 keyframes in
+37 s, and x264's default gap is 250 frames (4.2 s at 60 fps), so "early" can mean
+seconds. Added:
+
+- Keyframe ticks under the timeline (`GET /api/keyframes/<id>`, from the existing packet
+  scan). Where ticks would sit closer than 0.4% of the width, some are skipped, but every
+  tick drawn is a real keyframe.
+- Ctrl+arrows jump to the previous/next keyframe. With the start bracket focused, the
+  bracket moves too.
+- A **Start on keyframe (X s earlier)** button beside the trim info. It moves the in-point
+  back to the Original's start, so the presets and the Original begin on the same frame.
+  It sits in the tools row, not on the card, because the card is a `<button>` and can't
+  hold another.
+
+**Rejected:** brackets catching on keyframes. On the reference clip keyframes are about
+14 px apart, and the catch distance is 8 px, so almost every drag would land on a keyframe.
+That breaks frame-exact preset trims. Parked in the spec as an opt-in idea.
+
+**Snap tolerance widened to SEEK_SLACK_S (2 ms)** (MODERATE). It was 1e-6. If the player
+reported a keyframe's time even a fraction of a ms low, Set start there would snap the
+Original back a whole keyframe gap. The presets' seek already treats 2 ms as the same
+frame, so the snap now does too. `snap_s` is clamped at 0. Checked on a generated clip with
+keyframes at 0/10/20 s, in the fallback player: Ctrl+arrows landed on frame 600 exactly
+(burned-in counter), the button moved a 15 s start to 10 s, and the warning cleared. In
+video mode one Ctrl+arrow seek set `currentTime` to 10.0005, as intended. 164 tests pass.
+
+Also renamed the bracket-to-scrubbed-spot behaviour from "snaps onto" to "catches on"
+(README, code comment, `CATCH_PX`), so **Snap** keeps its one glossary meaning.
 
 **Not checked here:** dragging and keys in *video* mode with the pane on screen. The
 browser pane was hidden for most of the session, and `requestVideoFrameCallback` (which

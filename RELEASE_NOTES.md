@@ -7,16 +7,19 @@ the waiting shrinks a file better than any compression level can.
 
 ### New
 
-- **Trim.** A player now sits above the size cards. Drag the orange handles, or play to the
+- **Trim.** A player now sits above the size cards. Drag the orange brackets, or play to the
   spot and click **Set start** / **Set end**. Every card's size updates as you go, and
   **Squish it** encodes just that part, starting on exactly the frame you picked.
 - **Original.** Once you've trimmed, a fifth card appears. It cuts the clip out without
   re-encoding: full quality, done in a second, same format as your file. The catch: a copy
-  can only start on a keyframe, so it may start a little before your start point. The card
-  says how much, usually under a second.
+  can only start on a keyframe, so it may start before your start point. The card
+  says how much. Usually that's under a second, but phone videos can be several seconds out.
+- **You can see the keyframes.** Little ticks under the timeline show where an Original
+  is allowed to start. Ctrl+arrows jump between them, and **Start on keyframe** moves your
+  start back to the one the Original will use, so everything starts on the same frame.
 - **Save frame.** Saves the frame on screen as a full-size JPEG, next to your videos.
-- **Keys:** `I` / `O` set start / end, arrows step one frame, Shift+arrows one second, Space
-  plays and pauses.
+- **Keys:** `I` / `O` set start / end, arrows step one frame, Shift+arrows one second,
+  Ctrl+arrows one keyframe, Space plays and pauses.
 
 Videos your browser can't play still work: the preview switches to frames from ffmpeg (no
 sound), and trimming and Save frame carry on as normal.

@@ -65,7 +65,10 @@ def make_trim(in_s: float, out_s: float, duration_s: float) -> Trim | None:
 
 
 def snap_to_keyframe(keyframes: Sequence[float], in_s: float) -> float:
-    """Return the latest keyframe at or before in_s; never a later one.
+    """Return the latest keyframe at or before in_s; never a later frame.
+
+    A keyframe up to SEEK_SLACK_S after in_s counts as at it: the player may report a
+    frame's time slightly low, and the presets' seek treats that gap as the same frame.
 
     Args:
         keyframes: Keyframe times of the video stream, any order.
@@ -74,7 +77,7 @@ def snap_to_keyframe(keyframes: Sequence[float], in_s: float) -> float:
     Returns:
         The keyframe time, or 0.0 if no keyframe precedes the in-point.
     """
-    before = [k for k in keyframes if k <= in_s + 1e-6]
+    before = [k for k in keyframes if k <= in_s + SEEK_SLACK_S]
     return max(before) if before else 0.0
 
 

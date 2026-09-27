@@ -115,6 +115,23 @@ def test_original_reports_snap_once_scanned(server, uploaded):  # noqa: F811
     assert orig["est_bytes"] > 0
 
 
+def test_keyframes_listed_once_scanned(server, uploaded):  # noqa: F811
+    _, fid = uploaded
+    deadline = time.monotonic() + 30
+    while True:
+        status, _, body = _get(server, f"/api/keyframes/{fid}")
+        kf = json.loads(body)
+        if status != 200 or kf["ready"] or time.monotonic() > deadline:
+            break
+        time.sleep(0.1)
+    assert status == 200 and kf["ready"] and kf["error"] is None
+    assert kf["keyframes"] == pytest.approx([n / FPS for n in range(0, 4 * FPS, 15)], abs=1e-3)
+
+
+def test_keyframes_unknown_is_404(server):  # noqa: F811
+    assert _get(server, "/api/keyframes/nope")[0] == 404
+
+
 @pytest.mark.parametrize("body", [{"in_s": 3, "out_s": 1}, {"in_s": "x", "out_s": 2},
                                   {"in_s": 1}, {"in_s": 1, "out_s": 1.01}])
 def test_bad_trim_is_400(server, uploaded, body):  # noqa: F811

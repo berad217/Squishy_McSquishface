@@ -317,7 +317,7 @@ class Handler(BaseHTTPRequestHandler):
         est = copy_bytes([upload.video_packets, upload.audio_packets], start, trim.out_s)
         size = upload.info.size_bytes
         return {"ready": True, "ext": upload.copy_ext, "start_s": start,
-                "snap_s": round(trim.in_s - start, 6), "est_bytes": est,
+                "snap_s": round(max(0.0, trim.in_s - start), 6), "est_bytes": est,
                 "est_ratio": round(est / size, 4) if size > 0 else 0.0}
 
     def _run_ffmpeg(self, args: list[str], timeout: float) -> bytes:
@@ -360,6 +360,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._media(parts[2])
         if len(parts) == 3 and parts[:2] == ["api", "frame"]:
             return self._frame(parts[2])
+        if len(parts) == 3 and parts[:2] == ["api", "keyframes"]:
+            return self._keyframes(parts[2])
         return self._error(HTTPStatus.NOT_FOUND, "not found")
 
     def do_POST(self) -> None:  # noqa: N802
@@ -616,6 +618,18 @@ class Handler(BaseHTTPRequestHandler):
                 # The player dropped the connection (seeked elsewhere, or has enough buffered).
                 self.close_connection = True
         return None
+
+    def _keyframes(self, file_id: str) -> None:
+        """Keyframe times for the timeline ticks; ready is false until the scan is done."""
+        upload = self._upload_for(file_id)
+        if upload is None:
+            return None
+        packets = upload.video_packets
+        return self._send_json(HTTPStatus.OK, {
+            "ready": packets is not None,
+            "error": upload.scan_error,
+            "keyframes": sorted(round(p.pts, 6) for p in packets or [] if p.key),
+        })
 
     def _frame(self, file_id: str) -> None:
         """A scaled-down JPEG of the frame at ?t= (the fallback player)."""

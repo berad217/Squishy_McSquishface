@@ -41,8 +41,9 @@ _Avoid_: I-frame (fine in code comments), anchor
 
 **Snap**:
 How far the Original's start moves back from the in-point to reach a keyframe. Zero when
-the in-point is on a keyframe. Never moves forward.
-_Avoid_: offset, drift, rounding
+the in-point is on a keyframe. Never moves to a later frame. Only the Original snaps: a
+bracket *catches* on the scrubbed spot, and a player *jumps* to a keyframe.
+_Avoid_: offset, drift, rounding; "snap" for anything else
 
 **Still**:
 One frame saved as a JPEG at full source resolution.

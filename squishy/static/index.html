@@ -70,6 +70,8 @@
   .scrub .track { position: absolute; left: 0; right: 0; top: 9px; height: 6px; border-radius: 3px;
     background: var(--line); }
   .scrub .range { position: absolute; top: 9px; height: 6px; background: var(--accent); opacity: .55; }
+  .scrub .ticks { position: absolute; left: 0; right: 0; top: 16px; height: 7px; pointer-events: none; }
+  .scrub .tick { position: absolute; top: 0; width: 2px; height: 7px; margin-left: -1px; background: var(--text); opacity: .5; }
   .scrub .knob { position: absolute; top: 5px; width: 14px; height: 14px; margin-left: -7px;
     border-radius: 50%; background: var(--text); box-shadow: 0 0 0 2px var(--bg); cursor: grab; }
   .scrub .guide { position: absolute; top: 0; height: 44px; pointer-events: none; }
@@ -128,6 +130,7 @@
         <div class="lane-top" id="laneTop" aria-label="Timeline">
           <div class="track"></div>
           <div class="range" id="range"></div>
+          <div class="ticks" id="ticks"></div>
         </div>
         <div class="guide edge" id="gIn"></div>
         <div class="guide edge" id="gOut"></div>
@@ -143,13 +146,16 @@
         <button id="setIn" type="button" title="I">Set start</button>
         <button id="setOut" type="button" title="O">Set end</button>
         <span class="meta num" id="trimInfo"></span>
+        <button id="toKey" type="button" class="hidden num"
+          title="Move the start back to the keyframe the Original has to start on, so every card starts on the same frame"></button>
         <button id="resetTrim" type="button" class="hidden">Reset</button>
         <span class="sep"></span>
         <button id="saveFrame" type="button">Save frame</button>
       </div>
       <div class="meta" id="playerNote" style="font-size:13px;margin-top:6px">
         <kbd>I</kbd>/<kbd>O</kbd> set start/end &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> one frame &middot;
-        <kbd>Shift</kbd>+arrows 1 s &middot; <kbd>Space</kbd> play/pause
+        <kbd>Shift</kbd>+arrows 1 s &middot; <kbd>Ctrl</kbd>+arrows keyframe &middot; <kbd>Space</kbd> play/pause<br>
+        Ticks under the timeline are keyframes: an Original can only start on one.
       </div>
       <div class="meta hidden" id="fallbackNote" style="font-size:13px;margin-top:4px">
         This browser can't play this file, so the preview shows single frames from ffmpeg (no sound,
@@ -177,7 +183,8 @@
   const MIB = 1024 * 1024;
   const state = { source: null, plans: [], selected: null, job: null, poll: null, pollFails: 0, results: {}, xhr: null,
     // Player: t is the time of the frame on screen; trim is null when untouched.
-    t: 0, trim: null, original: null, mode: "video", plansTimer: null, plansSeq: 0 };
+    t: 0, trim: null, original: null, mode: "video", plansTimer: null, plansSeq: 0,
+    keyframes: null, kfTimer: null };
 
   const fmtMB = (b) => (b < 0.05 * MIB ? "<0.1" : (b / MIB).toFixed(1));
   const fmtTime = (s) => {
@@ -267,8 +274,11 @@
     state.results = {};
     state.trim = null;
     state.original = null;
+    state.keyframes = null;
+    clearTimeout(state.kfTimer);
     video.removeAttribute("src");
     video.load();
+    $("ticks").replaceChildren();
     $("player").classList.add("hidden");
     $("cards").replaceChildren();
     $("source").replaceChildren();
@@ -339,6 +349,9 @@
       wrap.append(c);
     }
     if (state.original) wrap.append(originalCard(state.original));
+    const o = state.original, early = o && o.ready && state.trim ? o.snap_s : 0;
+    $("toKey").classList.toggle("hidden", !(early > 0.0005));
+    if (early > 0.0005) $("toKey").textContent = `Start on keyframe (${early.toFixed(2)} s earlier)`;
     $("go").disabled = busy() || !state.selected;
     $("goHint").textContent = !state.selected ? "Pick a compression level"
       : state.trim ? `Squishes ${fmtClock(state.trim.in)} to ${fmtClock(state.trim.out)}` : "";
@@ -409,6 +422,8 @@
     state.trim = null;
     state.original = null;
     state.pendingEdge = null;
+    state.keyframes = null;
+    $("ticks").replaceChildren();
     state.mode = "video";
     $("player").classList.remove("hidden");
     frameImg.classList.add("hidden");
@@ -422,6 +437,47 @@
     }
     video.src = `/api/media/${s.file_id}`;
     renderTimeline();
+    fetchKeyframes();
+  }
+
+  // Keyframes feed the ticks, Ctrl+arrows and "Start on keyframe". They come from the
+  // server's packet scan, which finishes a moment after the upload.
+  async function fetchKeyframes() {
+    clearTimeout(state.kfTimer);
+    if (!state.source) return;
+    const fid = state.source.file_id;
+    const res = await api("GET", `/api/keyframes/${fid}`);
+    if (!state.source || state.source.file_id !== fid) return;
+    if (!res.ok || res.data.error) return; // no ticks; the Original card says why
+    if (!res.data.ready) { state.kfTimer = setTimeout(fetchKeyframes, 500); return; }
+    state.keyframes = res.data.keyframes;
+    renderTicks();
+  }
+  // Every tick is a real keyframe, but where they'd crowd closer than 0.4% of the width,
+  // some are left out.
+  function renderTicks() {
+    const box = $("ticks"), d = dur();
+    box.replaceChildren();
+    let last = -Infinity;
+    for (const k of state.keyframes || []) {
+      if (k - last < d * 0.004) continue;
+      last = k;
+      const tick = el("div", "tick");
+      tick.style.left = `${(100 * k) / d}%`;
+      box.append(tick);
+    }
+  }
+  // The frame a player shows at an exact keyframe time can round either way, so video
+  // mode aims just past it. Player times can also read a little low (trim.SEEK_SLACK_S).
+  const KF_SLACK = 0.002;
+  const seekKeyframe = (k) => seek(state.mode === "video" ? k + 0.0005 : k);
+  function stepKeyframe(dir) {
+    if (!state.keyframes) return flash("Still reading keyframes; try again in a moment.");
+    if (state.mode === "video") video.pause();
+    const kf = state.keyframes;
+    const k = dir > 0 ? kf.find((x) => x > state.t + KF_SLACK)
+      : kf.findLast((x) => x < state.t - KF_SLACK);
+    if (k !== undefined) seekKeyframe(k);
   }
 
   function useFrames() {
@@ -562,10 +618,11 @@
 
   // Timeline: drag a handle to move that edge, anywhere else to move the playhead.
   // A handle drag moves the playhead too (so you see the frame under it), which would lose
-  // the spot you scrubbed to. So that spot stays as a ghost marker, and the handle snaps
-  // onto it within SNAP_PX: scrub to a frame, then drag the handle to it.
+  // the spot you scrubbed to. So that spot stays as a ghost marker, and the handle catches
+  // on it within CATCH_PX: scrub to a frame, then drag the handle to it. ("Snap" means the
+  // Original's move back to a keyframe; see CONTEXT.md.)
   const scrub = $("scrub");
-  const SNAP_PX = 8;
+  const CATCH_PX = 8;
   let drag = null, anchor = null, moved = false;
   const timeAt = (x) => {
     const r = scrub.getBoundingClientRect();
@@ -575,7 +632,7 @@
     let t = timeAt(x);
     if (anchor !== null && drag !== "head") {
       const r = scrub.getBoundingClientRect();
-      if (Math.abs(x - (r.left + (anchor / dur()) * r.width)) <= SNAP_PX) t = anchor;
+      if (Math.abs(x - (r.left + (anchor / dur()) * r.width)) <= CATCH_PX) t = anchor;
     }
     if (drag === "in") {
       t = Math.min(t, curOut() - MIN_TRIM);
@@ -623,15 +680,23 @@
   $("setIn").addEventListener("click", setIn);
   $("setOut").addEventListener("click", setOut);
   $("resetTrim").addEventListener("click", () => setTrim(0, dur()));
+  $("toKey").addEventListener("click", () => {
+    const o = state.original;
+    if (!o || !o.ready || !state.trim) return;
+    if (setTrim(o.start_s, curOut())) seekKeyframe(o.start_s);
+  });
 
   window.addEventListener("keydown", (e) => {
-    if (!state.source || $("player").classList.contains("hidden") || e.ctrlKey || e.altKey || e.metaKey) return;
+    if (!state.source || $("player").classList.contains("hidden") || e.altKey || e.metaKey) return;
     const tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea") return;
     const k = e.key;
-    if (k === "ArrowLeft" || k === "ArrowRight") {
+    const arrow = k === "ArrowLeft" || k === "ArrowRight";
+    if (e.ctrlKey && !arrow) return; // leave Ctrl+anything else to the browser
+    if (arrow) {
       e.preventDefault();
-      step(k === "ArrowRight" ? 1 : -1, e.shiftKey);
+      const dir = k === "ArrowRight" ? 1 : -1;
+      if (e.ctrlKey) stepKeyframe(dir); else step(dir, e.shiftKey);
       if (e.target.id === "hIn") settleEdge("in"); // a focused handle moves with the playhead
       if (e.target.id === "hOut") settleEdge("out");
     } else if (k === "i" || k === "I") {

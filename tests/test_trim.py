@@ -57,6 +57,13 @@ def test_snap_on_a_keyframe_stays():
     assert snap_to_keyframe(KEYS, 1.1069999) == 1.107  # float noise counts as on it
 
 
+def test_snap_forgives_a_browser_rounding_down():
+    # A player can report a keyframe's time up to a millisecond low. Within SEEK_SLACK_S it is
+    # the same frame (the presets' seek treats it so), not a reason to go back a whole GOP.
+    assert snap_to_keyframe(KEYS, 1.1065) == 1.107
+    assert snap_to_keyframe(KEYS, 1.104) == 0.607  # 3 ms early: the frame before it
+
+
 def test_snap_in_last_gop():
     assert snap_to_keyframe(KEYS, 30.0) == 1.607
 
