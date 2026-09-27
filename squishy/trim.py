@@ -10,11 +10,12 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from .presets import CONTAINER_OVERHEAD
-
 MIN_TRIM_S = 0.1  # shorter than this is a slip of the mouse, not a clip
 UNTOUCHED_S = 0.001  # in/out this close to the ends counts as not trimmed
-SEEK_SLACK_S = 0.0005  # half a ms: far below any frame interval, above float noise
+# Seeks aim this far before a frame's time (or past a keyframe's, for copies). Covers the
+# browser reporting frame times rounded to the ms, and stays under half a frame even at
+# 240 fps (4.2 ms apart).
+SEEK_SLACK_S = 0.002
 
 
 @dataclass(frozen=True)
@@ -171,7 +172,10 @@ def parse_packets(text: str) -> list[Packet]:
 
 
 def copy_bytes(streams: Iterable[Sequence[Packet]], start_s: float, end_s: float) -> int:
-    """Size of a stream copy of [start_s, end_s): packet bytes plus container overhead.
+    """Size of a stream copy of [start_s, end_s): the packet bytes.
+
+    No container allowance: on the reference clip a copy's MP4 overhead measured 0.04%
+    (the ceilings' 1% made the figure 1% high). Tiny clips run a few KB over.
 
     Args:
         streams: Packet lists, one per copied stream.
@@ -181,5 +185,4 @@ def copy_bytes(streams: Iterable[Sequence[Packet]], start_s: float, end_s: float
     Returns:
         Expected output size in bytes.
     """
-    total = sum(p.size for pk in streams for p in pk if start_s <= p.pts < end_s)
-    return int(total * CONTAINER_OVERHEAD)
+    return sum(p.size for pk in streams for p in pk if start_s <= p.pts < end_s)

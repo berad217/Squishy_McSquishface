@@ -16,7 +16,8 @@ Python stdlib + ffmpeg. Single user, Windows, localhost only.
 | `squishy/tools.py` | ffmpeg lookup (`bin/` then PATH) + pinned, SHA-256-verified download |
 | `squishy/presets.py` | **The knobs.** Preset table + size-ceiling math. Pure. |
 | `squishy/probe.py` | ffprobe JSON -> `SourceInfo` (handles rotation, missing bitrates) |
-| `squishy/encoder.py` | ffmpeg argv builder, progress parser, `EncodeJob` thread |
+| `squishy/encoder.py` | ffmpeg argv builders (encode, trimmed encode, Original copy, frame), progress parser, `EncodeJob` thread |
+| `squishy/trim.py` | Trims, keyframe snap, output names, HTTP Range parsing, packet parsing. Pure. |
 | `squishy/server.py` | HTTP routes (table in spec.md section 5) |
 | `squishy/workdir.py` | Per-instance temp folder + lock; startup sweeps only dead instances' folders |
 | `squishy/static/index.html` | Whole UI: inline CSS + vanilla JS, no build step |
@@ -47,3 +48,11 @@ python launch.py --no-browser --out <scratch dir>
   batch files misbehave in cmd.exe.
 - Editing `server.py` / Python code requires restarting the server; `index.html` is read
   per request (just refresh).
+- **Untrimmed encodes must stay byte-identical to v0.2.4's args** (`test_untrimmed_args_match_v024`).
+- **Trim times are frame times.** The player reports each shown frame's exact time
+  (`requestVideoFrameCallback`), and every seek aims `SEEK_SLACK_S` (2 ms) before it, so
+  ffmpeg lands on that frame even if the browser rounds. `requestVideoFrameCallback` only
+  fires while the page is painting: in a hidden browser pane the time display freezes.
+  Test headless logic with `seeked` + `drawImage`, not rVFC.
+- **Packet times are relative to the file's `start_time`,** the timeline `-ss` uses.
+  ffprobe prints absolute ones; they differ for files that don't start at 0 (MPEG-TS).

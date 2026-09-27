@@ -1,5 +1,32 @@
 # Release notes
 
+## v0.3.0 - "Snip Snip"
+
+Squishy can now cut. Most captures are 90% waiting for the good bit, and throwing away
+the waiting shrinks a file better than any compression level can.
+
+### New
+
+- **Trim.** A player now sits above the size cards. Drag the orange handles, or play to the
+  spot and click **Set start** / **Set end**. Every card's size updates as you go, and
+  **Squish it** encodes just that part, starting on exactly the frame you picked.
+- **Original.** Once you've trimmed, a fifth card appears. It cuts the clip out without
+  re-encoding: full quality, done in a second, same format as your file. The catch: a copy
+  can only start on a keyframe, so it may start a little before your start point. The card
+  says how much, usually under a second.
+- **Save frame.** Saves the frame on screen as a full-size JPEG, next to your videos.
+- **Keys:** `I` / `O` set start / end, arrows step one frame, Shift+arrows one second, Space
+  plays and pauses.
+
+Videos your browser can't play still work: the preview switches to frames from ffmpeg (no
+sound), and trimming and Save frame carry on as normal.
+
+### Getting it
+
+Download **Source code (zip)** below and unzip it. **Close the old Squishy's black window
+first,** then double-click `Squishy.bat`. Copy your old `bin` folder into the new one to skip
+re-downloading ffmpeg.
+
 ## v0.2.4 - "Wait, Which One Is This?"
 
 One fix, found while testing v0.2.3 for real.

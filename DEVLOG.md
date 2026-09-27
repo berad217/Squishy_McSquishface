@@ -4,6 +4,55 @@ Newest entries first. Decisions, rationale, and measured results; not a changelo
 
 ---
 
+## 2026-09-27 - v0.3.0 built: trim, Original, Save frame
+
+161 tests pass (+79). Pure parts written test-first (`test_trim.py`, the v0.2.4 args pin);
+`test_trim_integration.py` checks frame-exactness on a generated clip whose frames carry
+their own number as 8 black/white blocks, so every output frame traces to its source frame.
+
+**Success criteria (spec Sprint 4):**
+
+1. Untrimmed args identical to v0.2.4: pinned by `test_untrimmed_args_match_v024`, written
+   before any change.
+2. Trimmed encodes start on the in-point frame and keep out - in +/- 1 frame, all four presets;
+   an in-point between two frames starts on the later one.
+3. Reference clip trimmed (5-15 s, and 2.16 s from 12.34 s): actual/ceiling 0.56-0.92.
+4. Original starts on the snapped keyframe (.mp4 and .mkv), keeps the container, and the
+   card's figure was within 1% at 82 MB and 21 MB. It was 1% *high*, from reusing the
+   ceilings' container allowance; a copy's real overhead is 0.04%, so the figure is now the
+   plain packet total. A copy takes 0.6 s.
+5. Displayed frame = saved frame, on the VFR reference clip. Canvas of the browser's
+   frame vs ffmpeg's frame at that time and at both neighbours, comparing only pixels that
+   change between them: at 5 of 8 positions the match was clear (3-6 vs 15-23). At 2, the
+   capture had a repeated frame (current = next, same picture either way); at 1, nothing
+   moved. The browser's frame time also matched ffprobe's (9.990 vs 9.990422).
+6. Range: 206 / 416 / whole-file tests; the real browser loads and seeks the 227 MB clip.
+7. Fallback: an MPEG-4 Part 2 file (Chrome can't decode it) switched to ffmpeg frames; trim by
+   keyboard, Save frame, a trimmed Extreme and an Original all ran from the UI.
+8. Version 0.3.0; README, RELEASE_NOTES, spec routes, onboarding updated.
+
+**Not checked here:** dragging and keys in *video* mode with the pane on screen. The
+browser pane was hidden for most of the session, and `requestVideoFrameCallback` (which
+reports the shown frame's time) only fires while the page paints. The time display froze
+at 0:00.000 until the pane was brought forward. Needs a desktop run.
+
+**Found along the way:**
+
+- **Seek slack widened to 2 ms** (MODERATE). The plan was 0.5 ms. If Chrome reports frame
+  times rounded to the ms, a 0.5 ms back-off lands on the next frame. That rounding is
+  unverified (it needs the pane painting), so the slack covers it anyway: 2 ms is under half
+  a frame up to 240 fps. Tests cover +/- 1 ms.
+- **Packet times must be relative to the file's start_time.** ffprobe prints absolute
+  times, and `-ss` counts from the start. They agree only when a file starts at 0. An .mkv
+  remux started its video at 0.021 s, and MPEG-TS files often start at 1.4 s.
+- **A copy's video can start a few ms after its audio** (18 ms here): audio cuts on AAC
+  frame boundaries. Sync is kept. A constant-rate decode pads the gap with a repeat of the
+  first frame, which fooled the first version of the frame-number test.
+- **Ceilings aren't proportional to length:** `maxrate * (duration + 1.8 s)`, so a 1 s cut
+  keeps nearly half the ceiling of a 4 s clip. Corrected in the planning entry below.
+
+---
+
 ## 2026-09-27 - v0.3 planned: trim + stills (grilled)
 
 Plan and success criteria are in spec.md Sprint 4. Two decisions a later reader would

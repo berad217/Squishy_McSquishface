@@ -137,12 +137,13 @@ def test_original_copy_starts_on_snapped_keyframe(counter_clip, tmp_path, ext):
                           "-of", "csv=p=0", str(dst)], capture_output=True, text=True).stdout
     assert ("matroska" in fmt) == (ext == ".mkv")
     if ext == ".mp4":
-        # Payload plus 1%, give or take the MP4 header and index: a few KB, which only
-        # shows on a clip this tiny (17 KB).
-        assert abs(job.output_bytes - est) <= 4096 + 0.02 * est
+        # The packet bytes plus the MP4 header and index: a few KB, which only shows on a
+        # clip this tiny (17 KB). On the reference clip the gap is 0.04%.
+        assert 0 <= job.output_bytes - est <= 4096 + 0.01 * est
 
 
-@pytest.mark.parametrize("t_offset", [0.0, 0.0001, -0.0001])
+# +/- 1 ms: a browser reporting frame times rounded to the ms still gets its frame.
+@pytest.mark.parametrize("t_offset", [0.0, 0.0001, -0.0001, 0.001, -0.001])
 def test_still_is_the_frame_at_t(counter_clip, tmp_path, t_offset):
     dst = tmp_path / "still.jpg"
     subprocess.run(build_frame_args(counter_clip, dst, 55 / FPS + t_offset), check=True)

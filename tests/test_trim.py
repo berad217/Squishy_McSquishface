@@ -89,9 +89,9 @@ def _medium(trim=None):
 def test_trimmed_args_seek_input_and_limit_duration():
     args = _medium(Trim(5.2, 12.8))
     i = args.index("-i")
-    # Input-side -ss (fast + frame-accurate when transcoding), backed off half a ms so a
+    # Input-side -ss (fast + frame-accurate when transcoding), backed off 2 ms (SEEK_SLACK_S) so a
     # frame whose time equals the in-point is kept.
-    assert args[i - 2:i] == ["-ss", "5.199500"]
+    assert args[i - 2:i] == ["-ss", "5.198000"]
     assert args[args.index("-t") + 1] == "7.600000"
     assert args.index("-t") > i
 
@@ -105,7 +105,7 @@ def test_copy_args():
     args = build_copy_args(Path("in.mov"), Path("out.mov"), 4.607, Trim(5.2, 12.8))
     i = args.index("-i")
     # Aim just past the keyframe so the demuxer lands on it, not the one before.
-    assert args[i - 2:i] == ["-ss", "4.607500"]
+    assert args[i - 2:i] == ["-ss", "4.609000"]
     assert args[args.index("-t") + 1] == "8.193000"
     assert args[args.index("-c") + 1] == "copy"
     assert "-map" in args and "0:V:0" in args
@@ -121,7 +121,7 @@ def test_copy_args_faststart_only_for_mp4_family():
 def test_frame_args_full_res_jpeg():
     args = build_frame_args(Path("in.mp4"), Path("still.jpg"), 12.345)
     i = args.index("-i")
-    assert args[i - 2:i] == ["-ss", "12.344500"]
+    assert args[i - 2:i] == ["-ss", "12.343000"]
     assert args[args.index("-frames:v") + 1] == "1"
     assert args[args.index("-q:v") + 1] == "2"
     assert "-vf" not in args
@@ -200,6 +200,6 @@ def test_parse_packets_relative_to_file_start():
 
 def test_copy_bytes_counts_range_only():
     pk = parse_packets(PACKETS)
-    # [0.0, 0.04): three packets; x1.01 container overhead, like the ceilings.
-    assert copy_bytes([pk], 0.0, 0.04) == int(1200 * 1.01)
-    assert copy_bytes([pk, pk], 0.0, 0.04) == int(2400 * 1.01)
+    # [0.0, 0.04): three packets.
+    assert copy_bytes([pk], 0.0, 0.04) == 1200
+    assert copy_bytes([pk, pk], 0.0, 0.04) == 2400

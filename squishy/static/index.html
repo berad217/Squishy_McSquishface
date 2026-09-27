@@ -56,6 +56,30 @@
   .card .done { color: var(--ok); font-size: 13px; margin-top: 6px; font-weight: 600; }
 
   .actions { display: flex; gap: 10px; align-items: center; margin-top: 16px; flex-wrap: wrap; }
+  .actions.sticky { position: sticky; bottom: 0; z-index: 5; background: var(--bg);
+    padding: 12px 0; border-top: 1px solid var(--line); }
+
+  .player { margin-top: 16px; }
+  .stage { background: #000; border-radius: var(--radius); overflow: hidden; }
+  .stage video, .stage img { display: block; width: 100%; max-height: 40vh; object-fit: contain; }
+  .scrub { position: relative; height: 34px; margin: 10px 0 4px; cursor: pointer; touch-action: none;
+    user-select: none; }
+  .scrub .track { position: absolute; left: 0; right: 0; top: 14px; height: 6px; border-radius: 3px;
+    background: var(--line); }
+  .scrub .range { position: absolute; top: 14px; height: 6px; background: var(--accent); opacity: .55; }
+  .scrub .playhead { position: absolute; top: 4px; width: 2px; height: 26px; margin-left: -1px;
+    background: var(--text); pointer-events: none; }
+  .scrub .handle { position: absolute; top: 2px; width: 12px; height: 30px; margin-left: -6px;
+    border-radius: 4px; background: var(--accent); cursor: ew-resize; }
+  .scrub .handle:focus-visible { outline: 2px solid var(--text); }
+  .ptools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .ptools .time { min-width: 7.5em; }
+  .ptools .sep { flex: 1; }
+  .ptools button { padding: 6px 12px; }
+  .meta { color: var(--muted); }
+  kbd { font: 12px ui-monospace, Consolas, monospace; border: 1px solid var(--line); border-radius: 4px;
+    padding: 0 4px; color: var(--muted); }
+  .card:disabled .size { opacity: .5; }
   .status { background: var(--card); border-radius: var(--radius); padding: 16px 18px; margin-top: 16px; }
   .status .row { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
   .status .headline { font-size: 18px; font-weight: 600; }
@@ -85,12 +109,44 @@
 
   <section id="loaded" class="panel hidden">
     <div class="source" id="source"></div>
-    <div class="cards" id="cards"></div>
-    <div class="actions">
-      <button class="primary" id="go" disabled>Squish it</button>
-      <span class="meta" id="goHint" style="color:var(--muted)">Pick a compression level</span>
+    <div class="player" id="player">
+      <div class="stage">
+        <video id="video" preload="auto" playsinline></video>
+        <img id="frameImg" class="hidden" alt="Frame preview">
+      </div>
+      <div class="scrub" id="scrub" aria-label="Timeline">
+        <div class="track"></div>
+        <div class="range" id="range"></div>
+        <div class="playhead" id="playhead"></div>
+        <div class="handle" id="hIn" tabindex="0" role="slider" aria-label="Trim start"></div>
+        <div class="handle" id="hOut" tabindex="0" role="slider" aria-label="Trim end"></div>
+      </div>
+      <div class="ptools">
+        <button id="play" type="button">Play</button>
+        <span class="time num" id="tNow">0:00.000</span>
+        <button id="setIn" type="button" title="I">Set start</button>
+        <button id="setOut" type="button" title="O">Set end</button>
+        <span class="meta num" id="trimInfo"></span>
+        <button id="resetTrim" type="button" class="hidden">Reset</button>
+        <span class="sep"></span>
+        <button id="saveFrame" type="button">Save frame</button>
+      </div>
+      <div class="meta" id="playerNote" style="font-size:13px;margin-top:6px">
+        <kbd>I</kbd>/<kbd>O</kbd> set start/end &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> one frame &middot;
+        <kbd>Shift</kbd>+arrows 1 s &middot; <kbd>Space</kbd> play/pause
+      </div>
+      <div class="meta hidden" id="fallbackNote" style="font-size:13px;margin-top:4px">
+        This browser can't play this file, so the preview shows single frames from ffmpeg (no sound,
+        no playback). Trimming and Save frame work the same.
+      </div>
+      <div class="meta" id="stillMsg" style="font-size:13px;margin-top:4px"></div>
     </div>
+    <div class="cards" id="cards"></div>
     <div class="status hidden" id="status"></div>
+    <div class="actions sticky">
+      <button class="primary" id="go" disabled>Squish it</button>
+      <span class="meta" id="goHint">Pick a compression level</span>
+    </div>
   </section>
 
   <footer>
@@ -103,7 +159,9 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const MIB = 1024 * 1024;
-  const state = { source: null, plans: [], selected: null, job: null, poll: null, pollFails: 0, results: {}, xhr: null };
+  const state = { source: null, plans: [], selected: null, job: null, poll: null, pollFails: 0, results: {}, xhr: null,
+    // Player: t is the time of the frame on screen; trim is null when untouched.
+    t: 0, trim: null, original: null, mode: "video", plansTimer: null, plansSeq: 0 };
 
   const fmtMB = (b) => (b < 0.05 * MIB ? "<0.1" : (b / MIB).toFixed(1));
   const fmtTime = (s) => {
@@ -191,6 +249,11 @@
     state.source = null;
     state.plans = [];
     state.results = {};
+    state.trim = null;
+    state.original = null;
+    video.removeAttribute("src");
+    video.load();
+    $("player").classList.add("hidden");
     $("cards").replaceChildren();
     $("source").replaceChildren();
     $("go").disabled = true;
@@ -225,10 +288,16 @@
 
     $("status").classList.add("hidden");
     $("loaded").classList.remove("hidden");
+    loadPlayer(s);
     renderCards();
   }
 
+  // Results belong to a preset *and* a range: a Medium of the whole clip says nothing
+  // about a Medium of 5 s of it.
+  const resultKey = (id) => (state.trim ? `${id}|${state.trim.in}|${state.trim.out}` : id);
+
   function renderCards() {
+    if (state.selected === "original" && !(state.original && state.original.ready)) state.selected = "medium";
     const wrap = $("cards");
     wrap.replaceChildren();
     for (const p of state.plans) {
@@ -249,19 +318,317 @@
       c.append(spec);
       if (p.bitrate_capped) c.append(el("div", "warn", "Capped at the source's own bitrate"));
       if (p.est_bytes >= state.source.size_bytes) c.append(el("div", "warn", "May not be smaller than the original"));
-      const r = state.results[p.preset_id];
+      const r = state.results[resultKey(p.preset_id)];
       if (r) c.append(el("div", "done num", `Done: ${fmtMB(r)} MB`));
       wrap.append(c);
     }
+    if (state.original) wrap.append(originalCard(state.original));
     $("go").disabled = busy() || !state.selected;
-    $("goHint").textContent = state.selected ? "" : "Pick a compression level";
+    $("goHint").textContent = !state.selected ? "Pick a compression level"
+      : state.trim ? `Squishes ${fmtClock(state.trim.in)} to ${fmtClock(state.trim.out)}` : "";
   }
+
+  // The Original card: the trimmed range copied without re-encoding. Its size is the
+  // real packet total, not a ceiling; its start is the keyframe at or before the in-point.
+  function originalCard(o) {
+    const c = el("button", "card" + (state.selected === "original" ? " selected" : ""));
+    c.type = "button";
+    c.disabled = busy() || !o.ready;
+    c.addEventListener("click", () => { state.selected = "original"; renderCards(); });
+    c.append(el("div", "label", "Original"));
+    if (!o.ready) {
+      c.append(el("div", "size num", "..."), el("div", "ratio", o.error ? "Can't read keyframes" : "Reading keyframes..."));
+      return c;
+    }
+    const size = el("div", "size num");
+    size.append(el("small", "", "about "), document.createTextNode(fmtMB(o.est_bytes) + " "), el("small", "", "MB"));
+    const pct = Math.round(o.est_ratio * 100);
+    c.append(size, el("div", "ratio num", pct >= 1 ? `~${pct}% of original` : "<1% of original"));
+    const spec = el("div", "spec");
+    spec.append(el("div", "", "No re-encode: the source's own quality"), el("div", "", `Same format (${o.ext})`));
+    c.append(spec);
+    if (o.snap_s > 0.0005) {
+      c.append(el("div", "warn num", `Starts ${o.snap_s.toFixed(2)} s early, at ${fmtClock(o.start_s)}: a copy can only start on a keyframe`));
+    }
+    const r = state.results[resultKey("original")];
+    if (r) c.append(el("div", "done num", `Done: ${fmtMB(r)} MB`));
+    return c;
+  }
+
+  // ---- player + trim -----------------------------------------------------
+  // Two modes: "video" (the browser plays the upload; rVFC reports each shown frame's
+  // exact time) and "frames" (fallback when it can't: ffmpeg renders the frame at t).
+  // Trim times are frame times, so the server's cut starts on the frame shown here.
+  const video = $("video");
+  const frameImg = $("frameImg");
+  const MIN_TRIM = 0.1; // matches trim.MIN_TRIM_S
+  const fmtClock = (s) => {
+    s = Math.max(0, s);
+    const m = Math.floor(s / 60);
+    return `${m}:${(s - m * 60).toFixed(3).padStart(6, "0")}`;
+  };
+  const frameDur = () => 1 / (state.source.fps || 30);
+  const dur = () => state.source.duration_s;
+  const curIn = () => (state.trim ? state.trim.in : 0);
+  const curOut = () => (state.trim ? state.trim.out : dur());
+  const lastT = () => Math.max(0, dur() - 0.001);
+
+  let rvfc = null;
+  function onVideoFrame(_now, meta) {
+    onFrame(meta.mediaTime);
+    rvfc = video.requestVideoFrameCallback(onVideoFrame);
+  }
+  const hasRvfc = "requestVideoFrameCallback" in HTMLVideoElement.prototype;
+  if (!hasRvfc) {
+    video.addEventListener("timeupdate", () => onFrame(video.currentTime));
+    video.addEventListener("seeked", () => onFrame(video.currentTime));
+  }
+  video.addEventListener("error", () => { if (state.source && video.getAttribute("src")) useFrames(); });
+  video.addEventListener("loadedmetadata", () => { if (!video.videoWidth) useFrames(); }); // sound, no picture
+  video.addEventListener("play", () => { $("play").textContent = "Pause"; });
+  video.addEventListener("pause", () => { $("play").textContent = "Play"; });
+
+  function loadPlayer(s) {
+    state.t = 0;
+    state.trim = null;
+    state.original = null;
+    state.pendingEdge = null;
+    state.mode = "video";
+    $("player").classList.remove("hidden");
+    frameImg.classList.add("hidden");
+    video.classList.remove("hidden");
+    $("fallbackNote").classList.add("hidden");
+    $("play").disabled = false;
+    $("stillMsg").textContent = "";
+    if (hasRvfc) {
+      if (rvfc !== null) video.cancelVideoFrameCallback(rvfc);
+      rvfc = video.requestVideoFrameCallback(onVideoFrame);
+    }
+    video.src = `/api/media/${s.file_id}`;
+    renderTimeline();
+  }
+
+  function useFrames() {
+    if (state.mode === "frames") return;
+    state.mode = "frames";
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    video.classList.add("hidden");
+    frameImg.classList.remove("hidden");
+    $("fallbackNote").classList.remove("hidden");
+    $("play").disabled = true;
+    showFrame(state.t);
+  }
+
+  // Fallback frames: one request in flight; while it runs, only the latest wish is kept.
+  let frameWant = null, frameBusy = false;
+  function showFrame(t) {
+    frameWant = t;
+    if (!frameBusy) nextFrame();
+  }
+  function nextFrame() {
+    if (frameWant === null || !state.source) { frameBusy = false; return; }
+    const t = frameWant, fid = state.source.file_id;
+    frameWant = null;
+    frameBusy = true;
+    const img = new Image();
+    img.onload = () => {
+      if (state.source && state.source.file_id === fid) { frameImg.src = img.src; onFrame(t); }
+      nextFrame();
+    };
+    img.onerror = () => nextFrame();
+    img.src = `/api/frame/${fid}?t=${t.toFixed(6)}`;
+  }
+
+  function onFrame(t) {
+    state.t = t;
+    renderTimeline();
+    const settled = state.mode === "video" ? !video.seeking : frameWant === null;
+    if (state.pendingEdge && settled) finishEdge();
+  }
+
+  function seek(t) {
+    t = Math.min(lastT(), Math.max(0, t));
+    if (state.mode === "video") video.currentTime = t;
+    else showFrame(t);
+    renderTimeline(t);
+  }
+
+  function step(dir, big) {
+    if (state.mode === "video") video.pause();
+    const fd = frameDur();
+    if (big) return seek(state.t + dir);
+    // The player shows the frame at or before currentTime; ffmpeg's frames are the ones at
+    // or after t. Aim mid-way into the neighbour so uneven (VFR) spacing still lands on it.
+    if (state.mode === "video") seek(dir > 0 ? state.t + 1.5 * fd : state.t - 0.5 * fd);
+    else seek(state.t + dir * fd);
+  }
+
+  function renderTimeline(head) {
+    if (!state.source) return;
+    const d = dur(), a = curIn(), b = curOut();
+    const pct = (t) => `${(100 * t) / d}%`;
+    $("range").style.left = pct(a);
+    $("range").style.width = pct(b - a);
+    $("hIn").style.left = pct(a);
+    $("hOut").style.left = pct(b);
+    $("playhead").style.left = pct(head === undefined ? state.t : head);
+    $("tNow").textContent = fmtClock(state.t);
+    $("trimInfo").textContent = state.trim ? `${fmtClock(a)} to ${fmtClock(b)} (${(b - a).toFixed(2)} s)` : "Whole video";
+    $("resetTrim").classList.toggle("hidden", !state.trim);
+  }
+
+  // Returns false if the range would be too short.
+  function setTrim(a, b) {
+    const d = dur();
+    a = Math.max(0, a);
+    b = Math.min(d, b);
+    if (b - a < MIN_TRIM) return false;
+    const untouched = a <= 0.001 && b >= d - 0.001;
+    const next = untouched ? null : { in: a, out: b };
+    if (JSON.stringify(next) === JSON.stringify(state.trim)) return true;
+    state.trim = next;
+    renderTimeline();
+    renderCards();
+    schedulePlans();
+    return true;
+  }
+  // Set start at the shown frame; past the end, the end goes back to the end of the video.
+  function setIn() {
+    const out = state.t >= curOut() - MIN_TRIM ? dur() : curOut();
+    if (!setTrim(state.t, out)) flash("The start has to be at least 0.1 s before the end of the video.");
+  }
+  // Set end so the shown frame is the last one kept (half a frame past its start).
+  function setOut() {
+    const end = state.t + frameDur() / 2;
+    const a = end <= curIn() + MIN_TRIM ? 0 : curIn();
+    if (!setTrim(a, end)) flash("The end has to be at least 0.1 s after the start of the video.");
+  }
+  function finishEdge() {
+    const e = state.pendingEdge;
+    state.pendingEdge = null;
+    clearTimeout(state.edgeTimer);
+    if (e === "in") setTrim(Math.min(state.t, curOut() - MIN_TRIM), curOut());
+    else if (e === "out") setTrim(curIn(), Math.max(state.t + frameDur() / 2, curIn() + MIN_TRIM));
+  }
+  // After a drag or a nudge, the edge lands on the frame the player ends up showing.
+  function settleEdge(edge) {
+    state.pendingEdge = edge;
+    clearTimeout(state.edgeTimer);
+    state.edgeTimer = setTimeout(finishEdge, 1500); // in case no new frame is presented
+  }
+  function flash(text) {
+    const msg = $("stillMsg");
+    msg.style.color = "var(--err)";
+    msg.textContent = text;
+  }
+
+  function schedulePlans() {
+    clearTimeout(state.plansTimer);
+    state.plansTimer = setTimeout(fetchPlans, 150);
+  }
+  async function fetchPlans() {
+    if (!state.source) return;
+    const seq = ++state.plansSeq;
+    const body = { file_id: state.source.file_id };
+    if (state.trim) Object.assign(body, { in_s: state.trim.in, out_s: state.trim.out });
+    const res = await api("POST", "/api/plans", body);
+    if (seq !== state.plansSeq) return; // a newer trim is on its way
+    if (!res.ok) return flash(`Could not update the sizes: ${res.data.error}`);
+    state.plans = res.data.plans;
+    state.original = res.data.original;
+    renderCards();
+    if (state.original && !state.original.ready && !state.original.error) {
+      state.plansTimer = setTimeout(fetchPlans, 500);
+    }
+  }
+
+  // Timeline: drag a handle to move that edge, anywhere else to move the playhead.
+  const scrub = $("scrub");
+  let drag = null;
+  const timeAt = (x) => {
+    const r = scrub.getBoundingClientRect();
+    return Math.min(1, Math.max(0, (x - r.left) / r.width)) * dur();
+  };
+  function dragTo(x) {
+    let t = timeAt(x);
+    if (drag === "in") {
+      t = Math.min(t, curOut() - MIN_TRIM);
+      setTrim(t, curOut());
+    } else if (drag === "out") {
+      t = Math.max(t, curIn() + MIN_TRIM);
+      setTrim(curIn(), t);
+    }
+    seek(t);
+  }
+  scrub.addEventListener("pointerdown", (e) => {
+    if (!state.source) return;
+    drag = e.target.id === "hIn" ? "in" : e.target.id === "hOut" ? "out" : "head";
+    scrub.setPointerCapture(e.pointerId);
+    if (state.mode === "video") video.pause();
+    dragTo(e.clientX);
+  });
+  scrub.addEventListener("pointermove", (e) => { if (drag) dragTo(e.clientX); });
+  const endDrag = () => {
+    if (drag === "in" || drag === "out") settleEdge(drag);
+    drag = null;
+  };
+  scrub.addEventListener("pointerup", endDrag);
+  scrub.addEventListener("pointercancel", endDrag);
+
+  $("play").addEventListener("click", () => { if (video.paused) video.play(); else video.pause(); });
+  $("setIn").addEventListener("click", setIn);
+  $("setOut").addEventListener("click", setOut);
+  $("resetTrim").addEventListener("click", () => setTrim(0, dur()));
+
+  window.addEventListener("keydown", (e) => {
+    if (!state.source || $("player").classList.contains("hidden") || e.ctrlKey || e.altKey || e.metaKey) return;
+    const tag = (e.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea") return;
+    const k = e.key;
+    if (k === "ArrowLeft" || k === "ArrowRight") {
+      e.preventDefault();
+      step(k === "ArrowRight" ? 1 : -1, e.shiftKey);
+      if (e.target.id === "hIn") settleEdge("in"); // a focused handle moves with the playhead
+      if (e.target.id === "hOut") settleEdge("out");
+    } else if (k === "i" || k === "I") {
+      setIn();
+    } else if (k === "o" || k === "O") {
+      setOut();
+    } else if (k === " " && tag !== "button" && state.mode === "video") {
+      e.preventDefault();
+      if (video.paused) video.play(); else video.pause();
+    }
+  });
+
+  $("saveFrame").addEventListener("click", async () => {
+    if (!state.source) return;
+    if (state.mode === "video") video.pause();
+    const btn = $("saveFrame");
+    const msg = $("stillMsg");
+    btn.disabled = true;
+    msg.style.color = "";
+    msg.textContent = "Saving frame...";
+    const res = await api("POST", "/api/still", { file_id: state.source.file_id, t: state.t });
+    btn.disabled = false;
+    msg.replaceChildren();
+    if (!res.ok) return flash(`Could not save the frame: ${res.data.error}`);
+    const open = el("button", "", "Open folder");
+    open.style.padding = "2px 10px";
+    open.style.marginLeft = "8px";
+    open.addEventListener("click", () => api("POST", `/api/still/${res.data.still_id}/reveal`));
+    msg.append(el("span", "num", `Saved ${res.data.name} (${fmtMB(res.data.bytes)} MB)`), open);
+  });
 
   // ---- encode ------------------------------------------------------------
   $("go").addEventListener("click", async () => {
     if (busy() || !state.selected || !state.source) return;
-    const res = await api("POST", "/api/encode", { file_id: state.source.file_id, preset_id: state.selected });
+    const body = { file_id: state.source.file_id, preset_id: state.selected };
+    if (state.trim) Object.assign(body, { in_s: state.trim.in, out_s: state.trim.out });
+    const res = await api("POST", "/api/encode", body);
     if (!res.ok) return showStatus("err", "Could not start", res.data.error);
+    state.jobKey = resultKey(state.selected);
     state.job = res.data;
     renderCards();
     renderJob();
@@ -289,7 +656,7 @@
     state.job = res.data;
     if (!busy()) {
       clearInterval(state.poll);
-      if (state.job.state === "done") state.results[state.job.preset_id] = state.job.output_bytes;
+      if (state.job.state === "done") state.results[state.jobKey] = state.job.output_bytes;
       renderCards();
     }
     renderJob();
@@ -298,13 +665,15 @@
   function renderJob() {
     const j = state.job;
     const plan = state.plans.find((p) => p.preset_id === j.preset_id);
+    const label = plan ? plan.label : "Original";
+    const verb = j.preset_id === "original" ? "Copying" : "Squishing";
     const box = $("status");
     box.className = "status";
     box.replaceChildren();
 
     if (j.state === "queued" || j.state === "running") {
       const row = el("div", "row");
-      row.append(el("div", "headline num", `Squishing (${plan.label})... ${j.percent.toFixed(0)}%`));
+      row.append(el("div", "headline num", `${verb} (${label})... ${j.percent.toFixed(0)}%`));
       let eta = "";
       if (j.elapsed_s && j.percent > 2) eta = ` · ~${fmtTime(j.elapsed_s * (100 - j.percent) / j.percent)} left`;
       row.append(el("div", "meta num", `${fmtTime(j.elapsed_s || 0)} elapsed${eta}`));
@@ -319,7 +688,7 @@
         : reduction <= -0.5 ? `${(-reduction).toFixed(0)}% larger` : "about the same size";
       const row = el("div", "row");
       row.append(el("div", "headline num", `${fmtMB(j.output_bytes)} MB`),
-        el("div", "meta num", `was ${fmtMB(state.source.size_bytes)} MB · ${change} · estimate was ${fmtMB(j.est_bytes)} MB · took ${fmtTime(j.elapsed_s)}`));
+        el("div", "meta num", `was ${fmtMB(state.source.size_bytes)} MB · ${change} · ${j.preset_id === "original" ? "expected" : "estimate was"} ${fmtMB(j.est_bytes)} MB · took ${fmtTime(j.elapsed_s)}`));
       const acts = el("div", "actions");
       const reveal = el("button", "primary", "Open folder");
       reveal.addEventListener("click", () => api("POST", `/api/job/${j.job_id}/reveal`));

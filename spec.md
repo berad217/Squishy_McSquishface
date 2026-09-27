@@ -102,6 +102,13 @@ Squishy_McSquishface/
 | POST | `/api/job/<id>/cancel` | kill ffmpeg, delete partial |
 | POST | `/api/job/<id>/reveal` | `explorer /select,<path>` |
 | GET | `/api/job/<id>/download` | stream output file |
+| GET | `/api/media/<file_id>` | the upload, for the player (single-range `Range` -> 206) (v0.3) |
+| GET | `/api/frame/<file_id>?t=` | JPEG of the frame at t, max 960 wide (fallback player) (v0.3) |
+| POST | `/api/plans` | `{file_id, in_s?, out_s?}` -> plans for the trim + the Original card (v0.3) |
+| POST | `/api/still` | `{file_id, t}` -> full-res JPEG in the output folder (v0.3) |
+| POST | `/api/still/<id>/reveal` | `explorer /select,<path>` (v0.3) |
+
+`/api/encode` takes optional `in_s`/`out_s`, and `preset_id: "original"` (needs a trim).
 
 **Estimate math** (why it's predictable): every preset is CRF 23 capped by `-maxrate`, so
 the bitrate ceiling is known. Size ceiling =
@@ -201,10 +208,13 @@ Grilled 2026-09-27; the two load-bearing decisions are in the DEVLOG. Terms are 
     math stays in `presets.py`. The Squish button lives in a bottom bar that is always visible.
   - An **Original** card, shown only when trimmed: stream copy, start snapped to the
     keyframe at or before the in-point, the card showing the snap. Keeps the source's
-    container. Its size is exact (packet sizes in range), not a ceiling.
+    container. Its size is the packet total in range, not a ceiling (within 0.1% at
+    real sizes). Keyframes and packet sizes come from an ffprobe packet scan run in the
+    background after each upload.
   - **Save frame**: ffmpeg extracts the displayed frame (by its presentation time) as a
-    full-resolution JPEG (`-q:v 2`) into the output folder, `<stem>_still_<mm-ss.mmm>.jpg`.
-  - Trimmed outputs are named `<stem>_<preset>_<in>-<out>.<ext>`; untrimmed names are unchanged.
+    full-resolution JPEG (`-q:v 2`) into the output folder, `<stem>_still_<time>.jpg`.
+  - Trimmed outputs are named `<stem>_<preset>_<in>-<out>.<ext>`, times like `5.200s` /
+    `1m05.250s`; untrimmed names are unchanged. The Original's `<in>` is its snapped start.
     The trim survives across encodes of the same upload.
 - **Out of v0.3:** multiple segments, a timeline, spatial crop, audio editing, GIF export,
   still batches or galleries, typed-in times.

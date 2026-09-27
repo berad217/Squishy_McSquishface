@@ -1,6 +1,7 @@
 # Squishy McSquishface
 
-Drop a video in, pick how hard to squish it, get a smaller MP4.
+Drop a video in, pick how hard to squish it, get a smaller MP4. Optionally trim it to just
+the part you want first, or save a single frame as a picture.
 
 Squishy runs on your own computer: it's a tiny local web page driven by ffmpeg. Nothing is
 uploaded anywhere. Before you encode, it shows the **largest** file each compression level can
@@ -32,7 +33,13 @@ Squishy offers to download it the first time you run it.
 3. **First run only:** it asks `Download it now? [Y/n]`. Press Enter. This fetches ffmpeg
    (a 110 MB download that takes ~200 MB on disk, once) into a `bin` folder next to `Squishy.bat`.
 4. Your browser opens. Drop a video in, pick a level, and click **Squish it**.
-5. Your files go to **`Videos\Squished`**. Click **Open folder** to jump there.
+   - **To keep only part of it,** drag the orange handles under the video, or play to the
+     right spot and click **Set start** / **Set end** (keys `I` / `O`; arrow keys step one
+     frame, Shift+arrows one second). The sizes update as you go. An extra **Original** card
+     appears that cuts the clip without re-encoding at all.
+   - **Save frame** saves the frame you're looking at as a full-size JPEG.
+5. Your files go to **`Videos\Squished`**. Click **Open folder** to jump there. Trimmed clips
+   and frames have their time range in the name, e.g. `clip_medium_5.200s-12.800s.mp4`.
 
 To quit, close the black console window. To uninstall, delete the folder. Your squished videos
 stay in `Videos\Squished`.
@@ -47,6 +54,13 @@ says so and stops, rather than quietly opening the old version.
 - **A level says "capped at the source's own bitrate".** Your video is already small, and
   adding bits can't add quality back.
 - **MB here means the same as in Windows Explorer**, so the numbers match what Explorer shows.
+- **The Original card starts a little before your start point.** Copying without re-encoding
+  can only start on a *keyframe* (a frame stored whole; the ones between are stored as
+  changes). The card says how early, usually well under a second. The squish levels start
+  exactly where you set.
+- **The preview is a still picture with no sound, and Play is greyed out.** Your browser
+  can't play that kind of video, so Squishy shows frames from ffmpeg instead. Trimming and
+  Save frame still work.
 
 ### Troubleshooting
 
