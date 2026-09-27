@@ -31,6 +31,14 @@ their own number as 8 black/white blocks, so every output frame traces to its so
    keyboard, Save frame, a trimmed Extreme and an Original all ran from the UI.
 8. Version 0.3.0; README, RELEASE_NOTES, spec routes, onboarding updated.
 
+**User's desktop check, first finding:** after scrubbing to a spot, dragging a handle there
+was impossible. The handle drag moves the playhead (to show the frame under the handle),
+which erased the spot. Fix: on grabbing a handle, the playhead's spot stays as a dashed ghost
+marker, and the handle snaps onto it within 8 px. Also, grabbing a handle without moving
+it no longer changes anything; it used to jump to the pointer. Checked in the browser with
+real mouse input: a release 5 px from a ghost at 3.003 set the end to 3.020 (that frame +
+half a frame); a far drag doesn't snap; a click leaves the trim alone.
+
 **Not checked here:** dragging and keys in *video* mode with the pane on screen. The
 browser pane was hidden for most of the session, and `requestVideoFrameCallback` (which
 reports the shown frame's time) only fires while the page paints. The time display froze

@@ -35,7 +35,8 @@ Squishy offers to download it the first time you run it.
 4. Your browser opens. Drop a video in, pick a level, and click **Squish it**.
    - **To keep only part of it,** drag the orange handles under the video, or play to the
      right spot and click **Set start** / **Set end** (keys `I` / `O`; arrow keys step one
-     frame, Shift+arrows one second). The sizes update as you go. An extra **Original** card
+     frame, Shift+arrows one second). Scrubbed to the right spot first? Drag a handle
+     toward it and the handle snaps onto it. The sizes update as you go. An extra **Original** card
      appears that cuts the clip without re-encoding at all.
    - **Save frame** saves the frame you're looking at as a full-size JPEG.
 5. Your files go to **`Videos\Squished`**. Click **Open folder** to jump there. Trimmed clips

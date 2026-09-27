@@ -69,6 +69,8 @@
   .scrub .range { position: absolute; top: 14px; height: 6px; background: var(--accent); opacity: .55; }
   .scrub .playhead { position: absolute; top: 4px; width: 2px; height: 26px; margin-left: -1px;
     background: var(--text); pointer-events: none; }
+  .scrub .ghost { position: absolute; top: 4px; height: 26px; margin-left: -1px; pointer-events: none;
+    border-left: 2px dashed var(--text); opacity: .55; }
   .scrub .handle { position: absolute; top: 2px; width: 12px; height: 30px; margin-left: -6px;
     border-radius: 4px; background: var(--accent); cursor: ew-resize; }
   .scrub .handle:focus-visible { outline: 2px solid var(--text); }
@@ -118,6 +120,7 @@
         <div class="track"></div>
         <div class="range" id="range"></div>
         <div class="playhead" id="playhead"></div>
+        <div class="ghost hidden" id="ghost"></div>
         <div class="handle" id="hIn" tabindex="0" role="slider" aria-label="Trim start"></div>
         <div class="handle" id="hOut" tabindex="0" role="slider" aria-label="Trim end"></div>
       </div>
@@ -545,14 +548,22 @@
   }
 
   // Timeline: drag a handle to move that edge, anywhere else to move the playhead.
+  // A handle drag moves the playhead too (so you see the frame under it), which would lose
+  // the spot you scrubbed to. So that spot stays as a ghost marker, and the handle snaps
+  // onto it within SNAP_PX: scrub to a frame, then drag the handle to it.
   const scrub = $("scrub");
-  let drag = null;
+  const SNAP_PX = 8;
+  let drag = null, anchor = null, moved = false;
   const timeAt = (x) => {
     const r = scrub.getBoundingClientRect();
     return Math.min(1, Math.max(0, (x - r.left) / r.width)) * dur();
   };
   function dragTo(x) {
     let t = timeAt(x);
+    if (anchor !== null && drag !== "head") {
+      const r = scrub.getBoundingClientRect();
+      if (Math.abs(x - (r.left + (anchor / dur()) * r.width)) <= SNAP_PX) t = anchor;
+    }
     if (drag === "in") {
       t = Math.min(t, curOut() - MIN_TRIM);
       setTrim(t, curOut());
@@ -567,12 +578,26 @@
     drag = e.target.id === "hIn" ? "in" : e.target.id === "hOut" ? "out" : "head";
     scrub.setPointerCapture(e.pointerId);
     if (state.mode === "video") video.pause();
+    if (drag !== "head") {
+      anchor = state.t;
+      $("ghost").style.left = `${(100 * anchor) / dur()}%`;
+      $("ghost").classList.remove("hidden");
+      e.preventDefault();
+      return; // grabbing a handle doesn't move it; only dragging does
+    }
     dragTo(e.clientX);
   });
-  scrub.addEventListener("pointermove", (e) => { if (drag) dragTo(e.clientX); });
+  scrub.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    moved = true;
+    dragTo(e.clientX);
+  });
   const endDrag = () => {
-    if (drag === "in" || drag === "out") settleEdge(drag);
+    if ((drag === "in" || drag === "out") && moved) settleEdge(drag);
     drag = null;
+    moved = false;
+    anchor = null;
+    $("ghost").classList.add("hidden");
   };
   scrub.addEventListener("pointerup", endDrag);
   scrub.addEventListener("pointercancel", endDrag);
