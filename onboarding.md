@@ -17,6 +17,7 @@ Python stdlib + ffmpeg. Single user, Windows, localhost only.
 | `squishy/probe.py` | ffprobe JSON -> `SourceInfo` (handles rotation, missing bitrates) |
 | `squishy/encoder.py` | ffmpeg argv builder, progress parser, `EncodeJob` thread |
 | `squishy/server.py` | HTTP routes (table in spec.md section 5) |
+| `squishy/workdir.py` | Per-instance temp folder + lock; startup sweeps only dead instances' folders |
 | `squishy/static/index.html` | Whole UI: inline CSS + vanilla JS, no build step |
 | `tests/` | pytest; `test_integration.py` and `test_server.py` run real ffmpeg |
 

@@ -4,6 +4,36 @@ Newest entries first. Decisions, rationale, and measured results; not a changelo
 
 ---
 
+## 2026-09-26 - Per-instance temp folders (audit finding 6)
+
+Uncommitted, unreleased. 68 tests pass (+5 `test_workdir.py`).
+
+**Problem.** Every instance shared `%TEMP%\squishy`. Startup `rmtree`'d it, and so did shutdown,
+so one instance could delete another's uploads, in either direction. A second instance is
+realistic, not contrived: if something else holds 48123, the first Squishy falls back to a
+free port. The next double-click then pings 48123, doesn't find Squishy, and starts another instance.
+Reproduced live (two `launch.py` processes, ports 48201/48202): A uploads, B starts, and A's
+encode fails with "Error opening input: No such file". After the fix: A's encode is `done`.
+
+**Fix: `squishy/workdir.py`.** Each instance claims `run-<id>/` plus `run-<id>.lock` beside it,
+holding the lock open for its lifetime. The startup sweep deletes only folders whose lock it
+can take. On Windows that test is deleting the lock, which fails with a sharing violation
+while the owner has it open; on POSIX it's `flock`. The OS closes the handle however the
+process dies, so crash leftovers still get swept (checked: two hard-killed instances'
+folders removed by the next start). Shutdown releases only its own folder.
+- The lock is created before the folder, and the sweep re-checks for a lock right before
+  deleting. So a folder listed mid-startup is never taken for stale.
+- Rejected: PID-in-name liveness. PIDs get reused, and `os.kill(pid, 0)` on Windows
+  *terminates* the process instead of probing it.
+- Loose files directly under the root (the v0.2.2-and-earlier layout) are swept too.
+  An old-version instance running alongside would still `rmtree` everything; can't fix that.
+- Known gap, POSIX only: between `open("x")` and `flock` there's a window of microseconds
+  in which a sweep could take a brand-new lock.
+
+Also: backfilled the missing GitHub Release for v0.2.1 (the tag existed; v0.2.0 was still "Latest").
+
+---
+
 ## 2026-09-26 - v0.2.2: upload-flow fixes (audit findings 5, 8, 9, 10)
 
 v0.2.2. 63 tests pass (+4 in `test_server.py`), and 18/18

@@ -17,7 +17,6 @@ if sys.version_info < (3, 11):
 import argparse
 import json
 import logging
-import shutil
 import tempfile
 import threading
 import urllib.request
@@ -28,6 +27,7 @@ from typing import TextIO
 from squishy.server import AppState, SquishyServer
 from squishy.tools import (BIN_DIR, FFMPEG_BYTES, FFMPEG_VERSION, DownloadError, Tools,
                            download_supported, download_tools, find_tools)
+from squishy.workdir import claim_work_dir, sweep_stale
 
 log = logging.getLogger("squishy")
 
@@ -174,15 +174,16 @@ def main(argv: list[str] | None = None) -> int:
             webbrowser.open(url)
         return 0
 
-    # Leftovers from a run that was killed (console closed) are safe to remove.
-    shutil.rmtree(TEMP_ROOT, ignore_errors=True)
+    # Leftovers from runs that were killed (console closed). Only those: another open
+    # Squishy (on another port) keeps its folder and the uploads in it.
+    sweep_stale(TEMP_ROOT)
     try:
-        TEMP_ROOT.mkdir(parents=True, exist_ok=True)
+        work = claim_work_dir(TEMP_ROOT)
     except OSError as exc:
-        log.error("Cannot create temp folder %s: %s", TEMP_ROOT, exc)
+        log.error("Cannot create temp folder in %s: %s", TEMP_ROOT, exc)
         return 1
 
-    app = AppState(temp_dir=TEMP_ROOT, out_dir=args.out.expanduser().resolve(),
+    app = AppState(temp_dir=work.path, out_dir=args.out.expanduser().resolve(),
                    ffmpeg=tools.ffmpeg, ffprobe=tools.ffprobe)
     try:
         server = SquishyServer(("127.0.0.1", args.port), app)
@@ -204,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         server.server_close()
         app.shutdown()
+        work.release()
     return 0
 
 

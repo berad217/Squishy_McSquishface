@@ -81,7 +81,8 @@ Squishy_McSquishface/
 
 **Flow:**
 1. Browser `POST /api/upload` streams the dropped file (raw body, `X-Filename` header)
-   to `%TEMP%\squishy\<file_id>.<ext>`. Loopback copy of 227 MB takes ~1-2 s.
+   to `%TEMP%\squishy\run-<id>\<file_id>.<ext>` (one folder per running instance; see
+   `squishy/workdir.py`). Loopback copy of 227 MB takes ~1-2 s.
 2. Server runs ffprobe, returns `SourceInfo` + one `Estimate` per preset.
 3. Browser `POST /api/encode {file_id, preset_id}` -> `job_id`.
 4. `EncodeJob` runs ffmpeg with `-progress pipe:1 -nostats`; browser polls
