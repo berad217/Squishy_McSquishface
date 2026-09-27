@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "squishy",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["launch.py", "--no-browser", "--port", "48200", "--out", ".claude/preview-out"],
+      "port": 48200
+    }
+  ]
+}
