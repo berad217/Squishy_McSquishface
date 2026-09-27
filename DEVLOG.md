@@ -24,6 +24,12 @@ item from the desktop check below.
   `Squishy.bat` too: the message, "Press any key", exit 1.
 - README gained an "Upgrading?" line.
 
+**Checked by the user on the desktop, after release.** With v0.2.3 still open, a v0.2.4
+double-click showed the refusal and paused. That run was from the repo checkout, on the
+same commit as the tag. After closing v0.2.3: real drag-and-drop, Squish it, Open folder and
+Download all worked ("works fine"). Which copy that second run used wasn't stated. That closes the
+"still needs a human" list from the v0.2.3 check.
+
 ---
 
 ## 2026-09-26 - v0.2.3 checked on the real desktop
