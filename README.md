@@ -33,7 +33,7 @@ Squishy offers to download it the first time you run it.
 3. **First run only:** it asks `Download it now? [Y/n]`. Press Enter. This fetches ffmpeg
    (a 110 MB download that takes ~200 MB on disk, once) into a `bin` folder next to `Squishy.bat`.
 4. Your browser opens. Drop a video in, pick a level, and click **Squish it**.
-   - **To keep only part of it,** drag the orange handles under the video, or play to the
+   - **To keep only part of it,** drag the orange [ ] brackets under the timeline, or play to the
      right spot and click **Set start** / **Set end** (keys `I` / `O`; arrow keys step one
      frame, Shift+arrows one second). Scrubbed to the right spot first? Drag a handle
      toward it and the handle snaps onto it. The sizes update as you go. An extra **Original** card

@@ -62,18 +62,26 @@
   .player { margin-top: 16px; }
   .stage { background: #000; border-radius: var(--radius); overflow: hidden; }
   .stage video, .stage img { display: block; width: 100%; max-height: 40vh; object-fit: contain; }
-  .scrub { position: relative; height: 34px; margin: 10px 0 4px; cursor: pointer; touch-action: none;
-    user-select: none; }
-  .scrub .track { position: absolute; left: 0; right: 0; top: 14px; height: 6px; border-radius: 3px;
+  /* Two lanes so the playhead and the trim handles never compete for a click: the top lane
+     is the timeline (click or drag anywhere to scrub), the bottom lane holds only the
+     [ ] brackets. Guide lines cross both lanes to show alignment and take no clicks. */
+  .scrub { position: relative; height: 44px; margin: 10px 0 4px; touch-action: none; user-select: none; }
+  .scrub .lane-top { position: absolute; left: 0; right: 0; top: 0; height: 24px; cursor: pointer; }
+  .scrub .track { position: absolute; left: 0; right: 0; top: 9px; height: 6px; border-radius: 3px;
     background: var(--line); }
-  .scrub .range { position: absolute; top: 14px; height: 6px; background: var(--accent); opacity: .55; }
-  .scrub .playhead { position: absolute; top: 4px; width: 2px; height: 26px; margin-left: -1px;
-    background: var(--text); pointer-events: none; }
-  .scrub .ghost { position: absolute; top: 4px; height: 26px; margin-left: -1px; pointer-events: none;
-    border-left: 2px dashed var(--text); opacity: .55; }
-  .scrub .handle { position: absolute; top: 2px; width: 12px; height: 30px; margin-left: -6px;
-    border-radius: 4px; background: var(--accent); cursor: ew-resize; }
-  .scrub .handle:focus-visible { outline: 2px solid var(--text); }
+  .scrub .range { position: absolute; top: 9px; height: 6px; background: var(--accent); opacity: .55; }
+  .scrub .knob { position: absolute; top: 5px; width: 14px; height: 14px; margin-left: -7px;
+    border-radius: 50%; background: var(--text); box-shadow: 0 0 0 2px var(--bg); cursor: grab; }
+  .scrub .guide { position: absolute; top: 0; height: 44px; pointer-events: none; }
+  .scrub .playhead { width: 2px; margin-left: -1px; background: var(--text); opacity: .8; }
+  .scrub .edge { width: 1px; background: var(--accent); opacity: .5; }
+  .scrub .ghost { margin-left: -1px; border-left: 2px dashed var(--text); opacity: .55; }
+  .scrub .handle { position: absolute; top: 25px; width: 16px; height: 18px; cursor: ew-resize;
+    border: 3px solid var(--accent); background: var(--accent-dim); }
+  .scrub .handle.in { border-right: none; border-radius: 5px 0 0 5px; margin-left: -1px; }
+  .scrub .handle.out { border-left: none; border-radius: 0 5px 5px 0; margin-left: -15px; }
+  .scrub .handle:hover { background: var(--accent); }
+  .scrub .handle:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
   .ptools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .ptools .time { min-width: 7.5em; }
   .ptools .sep { flex: 1; }
@@ -116,13 +124,18 @@
         <video id="video" preload="auto" playsinline></video>
         <img id="frameImg" class="hidden" alt="Frame preview">
       </div>
-      <div class="scrub" id="scrub" aria-label="Timeline">
-        <div class="track"></div>
-        <div class="range" id="range"></div>
-        <div class="playhead" id="playhead"></div>
-        <div class="ghost hidden" id="ghost"></div>
-        <div class="handle" id="hIn" tabindex="0" role="slider" aria-label="Trim start"></div>
-        <div class="handle" id="hOut" tabindex="0" role="slider" aria-label="Trim end"></div>
+      <div class="scrub" id="scrub">
+        <div class="lane-top" id="laneTop" aria-label="Timeline">
+          <div class="track"></div>
+          <div class="range" id="range"></div>
+        </div>
+        <div class="guide edge" id="gIn"></div>
+        <div class="guide edge" id="gOut"></div>
+        <div class="guide playhead" id="playhead"></div>
+        <div class="guide ghost hidden" id="ghost"></div>
+        <div class="knob" id="knob"></div>
+        <div class="handle in" id="hIn" tabindex="0" role="slider" aria-label="Trim start" title="Trim start (I)"></div>
+        <div class="handle out" id="hOut" tabindex="0" role="slider" aria-label="Trim end" title="Trim end (O)"></div>
       </div>
       <div class="ptools">
         <button id="play" type="button">Play</button>
@@ -474,9 +487,9 @@
     const pct = (t) => `${(100 * t) / d}%`;
     $("range").style.left = pct(a);
     $("range").style.width = pct(b - a);
-    $("hIn").style.left = pct(a);
-    $("hOut").style.left = pct(b);
-    $("playhead").style.left = pct(head === undefined ? state.t : head);
+    $("hIn").style.left = $("gIn").style.left = pct(a);
+    $("hOut").style.left = $("gOut").style.left = pct(b);
+    $("playhead").style.left = $("knob").style.left = pct(head === undefined ? state.t : head);
     $("tNow").textContent = fmtClock(state.t);
     $("trimInfo").textContent = state.trim ? `${fmtClock(a)} to ${fmtClock(b)} (${(b - a).toFixed(2)} s)` : "Whole video";
     $("resetTrim").classList.toggle("hidden", !state.trim);
@@ -575,7 +588,11 @@
   }
   scrub.addEventListener("pointerdown", (e) => {
     if (!state.source) return;
-    drag = e.target.id === "hIn" ? "in" : e.target.id === "hOut" ? "out" : "head";
+    // Handles live in the bottom lane; the top lane (and its knob) scrubs. Empty space in
+    // the bottom lane does nothing, so a near miss never moves the wrong thing.
+    const onTop = e.target.id === "knob" || e.target.closest("#laneTop");
+    drag = e.target.id === "hIn" ? "in" : e.target.id === "hOut" ? "out" : onTop ? "head" : null;
+    if (!drag) return;
     scrub.setPointerCapture(e.pointerId);
     if (state.mode === "video") video.pause();
     if (drag !== "head") {

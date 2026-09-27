@@ -39,6 +39,15 @@ it no longer changes anything; it used to jump to the pointer. Checked in the br
 real mouse input: a release 5 px from a ghost at 3.003 set the end to 3.020 (that frame +
 half a frame); a far drag doesn't snap; a click leaves the trim alone.
 
+**Second finding: playhead and handles competed for the same click** once they sat on
+top of each other. Fix (user's idea, refined): two lanes. The top lane is the timeline:
+click or drag anywhere in it (or its round knob) to scrub. The bottom lane holds only the
+`[` `]` brackets, and a click on its empty space does nothing. Thin guide lines cross both
+lanes to show alignment and take no clicks. Rejected: a taller playhead grabbed from the
+bottom (still ambiguous to a first-time user) and hidden priority rules. Checked with real
+mouse input, with the playhead exactly on the end bracket: a top-lane drag moved only the
+playhead, and a bottom-lane drag moved only the bracket.
+
 **Not checked here:** dragging and keys in *video* mode with the pane on screen. The
 browser pane was hidden for most of the session, and `requestVideoFrameCallback` (which
 reports the shown frame's time) only fires while the page paints. The time display froze
