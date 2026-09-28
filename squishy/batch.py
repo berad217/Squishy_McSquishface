@@ -219,10 +219,13 @@ class Batch:
             job.cancel()
 
     def _run(self) -> None:
-        log.info("Batch %s start: %d files, %s", self.batch_id, len(self.items), self.preset.id)
+        log.info("Batch %s start: %d files, %s, into %s", self.batch_id, len(self.items),
+                 self.preset.id, self.out_dir)
         with keep_awake():  # held between files too, not just during each encode
             for item in self.items:
                 self._one(item)
+                why = f" ({item.reason})" if item.reason else ""
+                log.info("Batch %s: %s %s%s", self.batch_id, item.path, item.state, why)
         self.finished_at = time.monotonic()
         self.state = "stopped" if self._stop else "done"
         log.info("Batch %s %s", self.batch_id, self.state)

@@ -47,6 +47,17 @@ so their teeth are unproven beyond the scenarios they drive.
 - `safe_stem` moved from `server.py` to `trim.py` (next to `output_stem`) so `batch.py` can
   use it without an import cycle; `server.py` re-exports it.
 
+**Log file (user asked where the logs go: nowhere but the console).** An unattended batch
+needs a record that outlives the window, so `launch.py` now also writes
+`logs/squishy.log` beside `bin/`: dated lines, 1 MB x 3 rotating, gitignored. It is beside
+`bin/` rather than in `%LOCALAPPDATA%` (user's choice), so deleting the folder still removes
+everything. It starts after the "already running" handoff, so a run that only opens the
+existing copy writes nothing, and tests (which stop at the handoff) never write into the
+repo. Each batch file gets one outcome line with its full path, and a failed encode's
+20-line ffmpeg tail was already logged. The batch summary points to the file when
+something failed. Checked in the preview: a file deleted after listing failed, and the
+log shows ffmpeg's full error, then the outcome line. 198 tests pass.
+
 ---
 
 ## 2026-09-27 - v0.4 planned: batch (grilled)

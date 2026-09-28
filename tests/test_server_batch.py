@@ -87,6 +87,7 @@ def test_folder_to_finished_batch(server, folder):  # noqa: F811
     assert done["state"] == "done"
     assert [(i["name"], i["state"]) for i in done["items"]] == [("b.mp4", "done")]
     assert done["bytes_after"] > 0
+    assert done["log_path"] is None  # no log file in tests; launch.py sets it
     assert (server.app.out_dir / "b_extreme.mp4").exists()
 
     server.app.out_dir.joinpath("b_extreme.mp4").unlink()  # reveal needs the file; don't open Explorer

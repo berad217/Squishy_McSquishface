@@ -104,6 +104,7 @@ class AppState:
     batch: Batch | None = None  # running, or finished and not yet dismissed
     picker: Callable[[str], list[Path]] = pick  # tests swap in a fake
     pick_lock: threading.Lock = field(default_factory=threading.Lock)
+    log_path: Path | None = None  # the log file, if launch.py could open one
 
     def active_job(self) -> EncodeJob | None:
         """Return the running job, if any (one at a time by design)."""
@@ -363,7 +364,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._keyframes(parts[2])
         if path == "/api/batch":
             batch = self.app.batch
-            return self._send_json(HTTPStatus.OK, batch.status() if batch else {"state": "none"})
+            if batch is None:
+                return self._send_json(HTTPStatus.OK, {"state": "none"})
+            log_path = str(self.app.log_path) if self.app.log_path else None
+            return self._send_json(HTTPStatus.OK, {**batch.status(), "log_path": log_path})
         return self._error(HTTPStatus.NOT_FOUND, "not found")
 
     def do_POST(self) -> None:  # noqa: N802

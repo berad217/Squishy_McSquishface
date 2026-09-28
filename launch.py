@@ -17,6 +17,7 @@ if sys.version_info < (3, 11):
 import argparse
 import json
 import logging
+import logging.handlers
 import tempfile
 import threading
 import urllib.request
@@ -26,7 +27,7 @@ from typing import TextIO
 
 from squishy import __version__
 from squishy.server import AppState, SquishyServer
-from squishy.tools import (BIN_DIR, FFMPEG_BYTES, FFMPEG_VERSION, DownloadError, Tools,
+from squishy.tools import (APP_ROOT, BIN_DIR, FFMPEG_BYTES, FFMPEG_VERSION, DownloadError, Tools,
                            download_supported, download_tools, find_tools)
 from squishy.workdir import claim_work_dir, sweep_stale
 
@@ -35,6 +36,33 @@ log = logging.getLogger("squishy")
 DEFAULT_PORT = 48123
 DEFAULT_OUT = Path.home() / "Videos" / "Squished"
 TEMP_ROOT = Path(tempfile.gettempdir()) / "squishy"
+LOG_DIR = APP_ROOT / "logs"  # beside bin/: deleting the folder still removes everything
+LOG_BYTES = 1_000_000
+LOG_BACKUPS = 3
+
+
+def add_file_log(log_dir: Path = LOG_DIR) -> logging.handlers.RotatingFileHandler | None:
+    """Also log to <log_dir>/squishy.log, so an unattended batch leaves a record.
+
+    Args:
+        log_dir: Folder for the log (created if missing).
+
+    Returns:
+        The handler (already on the root logger), or None if the file can't be written;
+        Squishy runs on without it.
+    """
+    path = log_dir / "squishy.log"
+    try:
+        log_dir.mkdir(exist_ok=True)
+        handler = logging.handlers.RotatingFileHandler(path, maxBytes=LOG_BYTES, backupCount=LOG_BACKUPS,
+                                                       encoding="utf-8")
+    except OSError as exc:
+        log.warning("Not keeping a log file (%s): %s", path, exc)
+        return None
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s",
+                                           datefmt="%Y-%m-%d %H:%M:%S"))
+    logging.getLogger().addHandler(handler)
+    return handler
 
 
 def running_version(port: int) -> str | None:
@@ -205,6 +233,12 @@ def main(argv: list[str] | None = None) -> int:
             webbrowser.open(url)
         return 0
 
+    # Only now, past the handoff: a run that just opens the already-running copy has
+    # nothing to record.
+    file_log = add_file_log()
+    if file_log is not None:
+        log.info("Squishy v%s starting; log file: %s", __version__, file_log.baseFilename)
+
     # Leftovers from runs that were killed (console closed). Only those: another open
     # Squishy (on another port) keeps its folder and the uploads in it.
     sweep_stale(TEMP_ROOT)
@@ -215,7 +249,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     app = AppState(temp_dir=work.path, out_dir=args.out.expanduser().resolve(),
-                   ffmpeg=tools.ffmpeg, ffprobe=tools.ffprobe)
+                   ffmpeg=tools.ffmpeg, ffprobe=tools.ffprobe,
+                   log_path=Path(file_log.baseFilename) if file_log else None)
     try:
         server = SquishyServer(("127.0.0.1", args.port), app)
     except OSError:
@@ -237,6 +272,10 @@ def main(argv: list[str] | None = None) -> int:
         server.server_close()
         app.shutdown()
         work.release()
+        if file_log is not None:
+            log.info("Squishy stopped")
+            logging.getLogger().removeHandler(file_log)
+            file_log.close()
     return 0
 
 

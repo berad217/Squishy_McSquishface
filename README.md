@@ -86,7 +86,8 @@ says so and stops, rather than quietly opening the old version.
 | "Squishy needs Python 3.11 or newer" | Install Python from python.org, ticking **Add python.exe to PATH**, then try again. |
 | "ffmpeg download failed" | Check your internet connection and run it again. A "checksum mismatch" means the download was corrupted, and Squishy threw it away rather than run it. |
 | The browser didn't open | Open the address printed in the console window, e.g. `http://127.0.0.1:48123/`. |
-| Anything else | Hand this README to your AI agent (next section), or send the console text to whoever gave you Squishy. |
+| A batch video failed | The row says why in short; the full story is in `logs\squishy.log` next to `Squishy.bat`. |
+| Anything else | Hand this README to your AI agent (next section), or send `logs\squishy.log` (or the console text) to whoever gave you Squishy. |
 
 ---
 
@@ -123,6 +124,8 @@ Constraints, so you don't "fix" the wrong thing:
 - **Run `--get-ffmpeg` before launching from a non-interactive shell.** If ffmpeg is missing,
   a plain launch prompts, reads EOF, treats that as "no", and exits 1. It won't hang.
 - **`launch.py` blocks until it's killed** (it's a server), so run it in the background.
+- **The log is `logs/squishy.log`** (dated lines, rotates at 1 MB, keeps 3 old files).
+  It holds the user's filenames and folder paths; it never leaves the PC.
 - Architecture, design decisions and a map of the code live in `onboarding.md`, `spec.md`
   and `DEVLOG.md`.
 

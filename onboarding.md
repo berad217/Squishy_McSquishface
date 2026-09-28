@@ -12,7 +12,7 @@ Python stdlib + ffmpeg. Single user, Windows, localhost only.
 | `CONTEXT.md` | Glossary: preset, ceiling, trim vs crop, Original, snap, still. Use these names |
 | `DEVLOG.md` | What was built and why; measured results on the reference clip |
 | `README.md` / `RELEASE_NOTES.md` | User-facing: install steps for humans + agents; cheeky per-release notes |
-| `Squishy.bat` -> `launch.py` | Entry point: finds Python, finds/offers ffmpeg, starts server on 127.0.0.1:48123, opens browser |
+| `Squishy.bat` -> `launch.py` | Entry point: finds Python, finds/offers ffmpeg, starts server on 127.0.0.1:48123, opens browser; logs to the console and `logs/squishy.log` (gitignored) |
 | `squishy/tools.py` | ffmpeg lookup (`bin/` then PATH) + pinned, SHA-256-verified download |
 | `squishy/presets.py` | **The knobs.** Preset table + size-ceiling math. Pure. |
 | `squishy/probe.py` | ffprobe JSON -> `SourceInfo` (handles rotation, missing bitrates) |

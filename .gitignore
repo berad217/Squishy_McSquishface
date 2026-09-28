@@ -10,3 +10,4 @@ samples/
 CLAUDE.local.md
 .claude/preview-out/
 .claude/settings.local.json
+logs/

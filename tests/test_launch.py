@@ -4,6 +4,7 @@ import http.server
 import io
 import json
 import logging
+import re
 import socket
 import threading
 from pathlib import Path
@@ -141,3 +142,26 @@ def test_same_or_newer_squishy_on_the_port_is_opened(handoff, running):
 def test_version_matches_pyproject():
     pyproject = (Path(__file__).parent.parent / "pyproject.toml").read_text(encoding="utf-8")
     assert f'version = "{launch.__version__}"' in pyproject
+
+
+# --- log file (v0.4: an unattended batch should leave a record) ---------------
+
+def test_file_log_has_dates_and_rotates(tmp_path):
+    handler = launch.add_file_log(tmp_path / "logs")
+    assert handler is not None
+    logger = logging.getLogger("squishy.test_file_log")
+    logger.setLevel(logging.INFO)
+    try:
+        logger.warning("batch item %s failed", "clip.mp4")
+    finally:
+        logging.getLogger().removeHandler(handler)
+        handler.close()
+    text = (tmp_path / "logs" / "squishy.log").read_text(encoding="utf-8")
+    assert re.search(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d WARNING squishy.test_file_log "
+                     r"batch item clip.mp4 failed$", text, re.M)
+    assert handler.maxBytes == launch.LOG_BYTES and handler.backupCount == launch.LOG_BACKUPS
+
+
+def test_unwritable_log_folder_is_not_fatal(tmp_path):
+    (tmp_path / "a-file").write_text("x")
+    assert launch.add_file_log(tmp_path / "a-file" / "logs") is None

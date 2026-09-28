@@ -1000,6 +1000,7 @@
     box.replaceChildren(el("div", "headline num", head),
       el("div", "meta num", `${parts.join(" · ")} · took ${fmtTime(b.elapsed_s)}`
         + (b.state === "stopped" ? " · choose the same folder again to carry on" : "")));
+    if (c.failed && b.log_path) box.append(el("div", "meta", `ffmpeg's full error for each failure is in ${b.log_path}`));
   }
 
   $("batchGo").addEventListener("click", async () => {
