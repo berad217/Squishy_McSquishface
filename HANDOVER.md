@@ -3,23 +3,21 @@
 ## 1. Orientation
 
 New AI: oriented via `onboarding.md`, glossary in `CONTEXT.md`. v0.3.0 (trim, Original,
-Save frame, visible keyframes) is built and committed, **not released**. Plan and criteria:
-spec.md Sprint 4. What was checked and what wasn't: the DEVLOG's top entry.
+Save frame, visible keyframes) is built, pushed and desktop-checked by the user; the
+GitHub release waits on their go. v0.4 (batch) is planned and grilled: spec.md Sprint 5,
+decisions and the picker spike in the DEVLOG's top entry. No v0.4 code yet.
 
 ## 2. The Delta
 
-- **Video-mode interaction is unchecked.** Dragging brackets, arrow keys, Ctrl+arrows and I/O
-  with a *playable* file were never run with the browser pane on screen (rVFC needs
-  painting). The fallback mode was fully exercised. This is the one gap before release.
-- The user started a desktop check with a WhatsApp clip (37 s, 4 keyframes); that is what
-  prompted the keyframe ticks. They had not reported results for I/O or arrows yet.
-- **Release is waiting on the user.** They asked to confirm before publishing a GitHub
-  release (like v0.2.x: tag, "Source code (zip)", notes from RELEASE_NOTES.md).
-- The reference clip is in `samples/` (gitignored).
+- **Release needs the user's explicit go** (tag v0.3.0 at `9b85601`, "Source code (zip)",
+  notes from RELEASE_NOTES.md), like v0.2.x.
+- The user runs Squishy on two desktops: this one and ROG (3800X, RTX 3090, cloned from
+  GitHub). Encode times differ between them; don't compare across machines.
+- Picker spike script lived in the session scratchpad and is gone; method and results are
+  in the DEVLOG.
 
 ## 3. Next Steps
 
-1. User desktop check of v0.3.0 on the reference clip and the WhatsApp clip: drag both
-   brackets, I/O, arrows, Ctrl+arrows, Space, Start on keyframe; Save frame; a trimmed
-   Medium; an Original. Watch that the time display moves.
-2. If it passes: push, tag v0.3.0, publish the release (after the user confirms).
+1. Release v0.3.0 once the user says go.
+2. Build v0.4 against Sprint 5, test-first where pure (file listing, totals, naming,
+   skip rules, the batch state machine).
