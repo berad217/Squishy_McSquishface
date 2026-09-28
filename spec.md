@@ -235,11 +235,60 @@ Grilled 2026-09-27; the two load-bearing decisions are in the DEVLOG. Terms are 
 - **Deliverables:** code, tests (pure parts test-first), DEVLOG entry with the still-frame
   measurement, GitHub release (after the user confirms).
 
+### Sprint 5: v0.4 batch
+
+Grilled 2026-09-27; the two load-bearing decisions are in the DEVLOG. Terms (**Batch**,
+**Skipped / Failed**) are in `CONTEXT.md`.
+
+- **Goal:** Squish a folder (or a hand-picked set) of videos with one preset, unattended.
+- **What it adds:**
+  - **Choose folder...** and **Choose files...** beside the drop zone. The *server* opens a
+    native Windows picker (tkinter, run in a subprocess) and reads the files where they
+    are; nothing is uploaded. No subfolders.
+  - A **batch view** in place of the player: the four preset cards show *totals* over the
+    ticked files; below them, one row per file (tick, name, length, size, the chosen
+    preset's ceiling). Everything is ticked at first; non-videos are listed, greyed, with
+    the reason.
+  - **Start** encodes ticked files one at a time, whole, with the chosen preset. Each row
+    shows waiting / % / done (actual size) / skipped or failed (reason); an overall bar
+    shows files done and time left; a summary at the end (total before -> after, the
+    skips and failures).
+  - **Skipped**: output already exists (this is also how a stopped batch resumes), not a
+    video, or the result was no smaller than the source (it is deleted). **Failed**: an
+    error; the batch carries on.
+  - **Stop** stops now: the partial output is deleted, finished files are kept, the rest
+    are "not started".
+  - The batch lives in the server: closing the tab doesn't stop it, and reopening shows
+    it. Single-file drops are refused while it runs.
+  - Outputs go to the usual folder with the usual names. If two ticked files share a stem
+    (`clip.mov`, `clip.mp4`), each gets its source extension: `clip-mov_medium.mp4`.
+  - **Keep awake:** Squishy asks Windows not to sleep while *any* encode runs (single or
+    batch); the screen may still turn off and lock.
+- **Out of v0.4:** subfolders, dropping several files on the page, a preset per file,
+  trims or the Original in a batch, "stop after this file", parallel encodes, GPU encoding.
+- **Success Criteria:**
+  1. The pickers open in front of the browser; cancelling one leaves the page as it was
+     (spike first).
+  2. The list is complete for the folder; non-videos greyed with a reason; totals equal
+     the sum of the per-file ceilings.
+  3. Each batch encode's ffmpeg args equal a single-file encode's for that preset (pinned).
+  4. Existing output -> skipped; a rerun after Stop resumes at the stopped file; a broken
+     file fails without stopping the batch; a no-smaller result is deleted and skipped.
+  5. Stop kills the current file and deletes its partial; finished files stay.
+  6. Reopening the tab shows the running batch.
+  7. The keep-awake request is held during encodes and released after, including after
+     a failure or Stop.
+  8. All existing tests pass; version 0.4.0; README and RELEASE_NOTES updated.
+  9. The user runs a real folder of at least 5 clips unattended.
+- **Deliverables:** code, tests, DEVLOG entry with the picker spike, GitHub release
+  (after the user confirms).
+
 ## 8. Out of Scope
 
 - Destination-aware limits (WhatsApp/Discord/email caps) - user's responsibility.
 - Hitting an exact target size (two-pass encoding).
-- Batch / multi-file queue.
+- Encoding several files at once. (Batches run one file at a time; see Sprint 5. A batch
+  queue was listed here until v0.4.)
 - Spatial cropping, audio removal, format choices other than MP4/H.264 (the Original
   card's stream copy keeps the source's container; that is the one exception). Trimming
   was listed here until v0.3; see Sprint 4.
@@ -255,7 +304,6 @@ Grilled 2026-09-27; the two load-bearing decisions are in the DEVLOG. Terms are 
 - **Sample-based estimate:** encode 3 x 2 s chunks to predict the *actual* size, not just
   the ceiling. *Spiked 2026-09-27, shelved:* only Light gains much, at about 85% of a
   Medium encode's time on a 31 s clip. Numbers and revisit condition in the DEVLOG.
-- **Batch queue:** drop a folder of clips.
 - **NVENC option:** much faster, somewhat worse quality per bit. *Spiked 2026-09-27, shelved:*
   under the presets' caps it scored 2-6 VMAF lower (Light: +29% size at matched quality) and
   was at most 1.6x faster. Numbers in the DEVLOG.

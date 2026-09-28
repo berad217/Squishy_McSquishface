@@ -4,6 +4,49 @@ Newest entries first. Decisions, rationale, and measured results; not a changelo
 
 ---
 
+## 2026-09-27 - v0.4 planned: batch (grilled)
+
+Plan and success criteria are in spec.md Sprint 5. The user asked for it after an 11 min,
+2 GB file took ~8 min on ROG (3800X, 8 cores): batch makes encode speed matter less
+than GPU encoding would (see the NVENC spike). Two decisions a later reader would question:
+
+- **Decision (user): batch comes into scope,** reversing spec section 8 again. It stays
+  one file at a time (x264 already uses every core) and one preset for all files, whole
+  files only: trims are hands-on, and batch exists so nobody has to be there.
+- **Decision (user, on my recommendation): files are read in place, via a picker the
+  server opens,** not uploaded. A browser can't hand a local page a folder's paths, only
+  copies of the files; for a folder of 2 GB captures that is tens of GB copied into temp
+  before the first encode. Squishy's server runs on the same machine, so it can open a
+  native Windows picker (tkinter, stdlib) and read the chosen files directly. The cost:
+  this is the first time the page acts on files outside what was dropped on it, and it
+  only works because the server is localhost-only (keep it that way). Rejected: a
+  `webkitdirectory` folder upload (the copies), and a typed path box (clumsy, easy to
+  get wrong).
+
+Smaller calls, on my recommendations: skip files whose output exists (makes Stop +
+rerun a resume); delete a result that isn't smaller and count it as skipped; one Stop
+(no "after this file"); keep the PC awake during any encode, not just batches.
+
+**Spike: does a server-spawned picker open in front?** (criterion 1, the one unknown.)
+Throwaway harness: a child Python runs tkinter `askdirectory` / `askopenfilenames` on a
+withdrawn root, with and without `-topmost`; the harness finds the dialog by title, checks
+`GetForegroundWindow`, then sends WM_CLOSE (= cancel).
+
+- All four variants opened in 1.5-2.0 s, **took the foreground**, and cancel returned an
+  empty result (`''` / `()`).
+- Worry: Windows blocks background processes from taking the foreground, and the first
+  run descended from the (foreground) Claude app. The foreground lock timeout here is the
+  maximum (never expires) and the user was active 24 s before. Re-run via WMI
+  `Win32_Process.Create` (parent outside that tree) with Windows Terminal in front: same
+  result, all four in front.
+- **Decision:** use `-topmost` anyway (it puts the picker above the browser even if some
+  machine does refuse focus) and show "Opening the picker..." on the page for the 1.5-2 s
+  tkinter start. The server is a `ThreadingHTTPServer`, so a request can wait on the picker
+  without blocking progress polls. Still to see: a real click from Chrome, on both
+  machines, in the build's check.
+
+---
+
 ## 2026-09-27 - v0.3.0 built: trim, Original, Save frame
 
 161 tests pass (+79) at the build; 164 after the fixes below. Pure parts written test-first (`test_trim.py`, the v0.2.4 args pin);
@@ -81,7 +124,9 @@ Also renamed the bracket-to-scrubbed-spot behaviour from "snaps onto" to "catche
 **Not checked here:** dragging and keys in *video* mode with the pane on screen. The
 browser pane was hidden for most of the session, and `requestVideoFrameCallback` (which
 reports the shown frame's time) only fires while the page paints. The time display froze
-at 0:00.000 until the pane was brought forward. Needs a desktop run.
+at 0:00.000 until the pane was brought forward. **Closed by the user's desktop use:**
+playback, the brackets, Save frame and a trim that came out right, on this machine
+and on ROG (a second desktop, cloned from GitHub).
 
 **Found along the way:**
 

@@ -54,6 +54,17 @@ The video view with the trim bar. Either the browser playing the file, or the fa
 silent frames rendered by ffmpeg when the browser can't play it.
 _Avoid_: preview (ambiguous with the fallback frames), scrubber (only its slider)
 
+**Batch**:
+One preset applied to a list of whole files, encoded one after another by the server
+while nobody watches. Files are read where they are, not uploaded.
+_Avoid_: queue (sounds like mixed jobs), bulk, multi-upload
+
+**Skipped / Failed**:
+How a batch file ends without a new output. *Skipped* is on purpose: its output already
+exists, it isn't a video, or the result was no smaller than the source (and was deleted).
+*Failed* means something went wrong (ffmpeg error). The summary counts them separately.
+_Avoid_: error for a skip; ignored
+
 ## Relationships
 
 - A **Trim** is one in-point and one out-point, never several segments
@@ -61,6 +72,7 @@ _Avoid_: preview (ambiguous with the fallback frames), scrubber (only its slider
 - A **Preset** has a **Ceiling**; the **Original** has an exact size instead
 - The **Original** starts at the in-point minus its **Snap**; presets start exactly at the in-point
 - A **Still** comes from the frame the **Player** is showing
+- A **Batch** has one **Preset** and no **Trim**; there is no Original in a batch
 
 ## Flagged ambiguities
 
