@@ -312,7 +312,11 @@ Grilled 2026-09-27; the two load-bearing decisions are in the DEVLOG. Terms (**B
   Medium encode's time on a 31 s clip. Numbers and revisit condition in the DEVLOG.
 - **NVENC option:** much faster, somewhat worse quality per bit. *Spiked 2026-09-27, shelved:*
   under the presets' caps it scored 2-6 VMAF lower (Light: +29% size at matched quality) and
-  was at most 1.6x faster. Numbers in the DEVLOG.
+  was at most 1.6x faster. Numbers in the DEVLOG. *2026-09-27:* the user wanted faster
+  encodes (an 11 min, 2 GB file took ~8 min on ROG). The spike found CPU decode + scale,
+  not the encoder, dominate, so the untested idea is **GPU decode feeding x264**: same
+  quality, possibly much faster. Proposed timing spike (not run; batch came first): decode
+  only on CPU vs GPU, GPU decode + x264, the full GPU path, and x264 `-preset medium`.
 - **Brackets that catch on keyframes:** rejected for v0.3. With keyframes 0.5 s apart
   (~14 px on the timeline) and an 8 px catch, nearly every drag would land on one, which
   fights frame-exact trims for the presets. Revisit only as an opt-in (a held modifier key).
