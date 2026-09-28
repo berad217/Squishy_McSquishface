@@ -1,5 +1,32 @@
 # Release notes
 
+## v0.4.0 - "Set It and Forget It"
+
+Squishy no longer needs you to sit there. Point it at a folder and go and do something else.
+
+### New
+
+- **Batches.** **Choose folder...** (or **Choose files...**) opens a normal Windows picker.
+  You get a list of the videos with every one ticked, and the four levels show the total
+  size for all of them. Untick what you don't want, pick a level, and click **Squish**.
+  Squishy works through them one at a time and shows each one's result as it goes, plus
+  a before/after total at the end.
+- **Your videos aren't copied first.** Squishy reads them where they are, so a folder of
+  big recordings starts squishing straight away.
+- **Stop and carry on later.** Stop throws away the half-finished video and keeps the
+  finished ones. Choose the same folder again and the ones already done are skipped.
+- **It won't make things worse.** If squishing a video doesn't make it any smaller, the
+  result is thrown away and the video is marked "skipped".
+- **Close the tab if you like.** The batch keeps going; reopen Squishy's page to check on it.
+- **No more sleeping on the job.** Your PC stays awake while Squishy is encoding (a single
+  video or a batch). The screen can still turn off and lock.
+
+### Getting it
+
+Download **Source code (zip)** below and unzip it. **Close the old Squishy's black window
+first,** then double-click `Squishy.bat`. Copy your old `bin` folder into the new one to skip
+re-downloading ffmpeg.
+
 ## v0.3.0 - "Snip Snip"
 
 Squishy can now cut. Most captures are 90% waiting for the good bit, and throwing away

@@ -4,6 +4,51 @@ Newest entries first. Decisions, rationale, and measured results; not a changelo
 
 ---
 
+## 2026-09-27 - v0.4.0 built: batch
+
+196 tests pass (+32). New: `batch.py` (pure helpers, listing, runner), `picker.py`,
+`awake.py`; routes in spec section 5. Tests were written before the code. The server
+route tests were seen failing first; the runner's were not (both runs went green at once),
+so their teeth are unproven beyond the scenarios they drive.
+
+**Criteria (spec Sprint 5):**
+
+1. Pickers: the spike, plus the real UI in the preview pane. A script filled the real
+   dialog through window messages (no keystrokes), for both a folder and two files. **Not
+   yet:** a click from Chrome on this PC and on ROG.
+2. Listing: videos sorted by name, all ticked; a broken `.mp4` greyed with "not a readable
+   media file"; `notes.txt` in a "Not videos, left out" line. Card totals are the sum of
+   the per-file ceilings (Medium: 10.0 MB vs rows 2.5 + 2.1 + 2.1 + 3.4, each rounded).
+3. `test_batch_encodes_every_file_with_single_file_args`: each job has no custom args and
+   the same `plan_for` plan, so it is the untrimmed single-file encode.
+4. Tests for skip-existing, a vanished source (fails, batch carries on), a starved-noise
+   source that re-encodes bigger (deleted, "no smaller"), and stop-then-resume. In the UI:
+   a rerun skipped the 3 files already done at that level.
+5. Stop in the UI: "Stopped; partial file deleted", the rest "Not started", no `.part` or
+   output left on disk.
+6. Reloading the page mid-run and after the end brings the batch (and summary) back.
+7. Recorded `SetThreadExecutionState` calls: every thread (the batch's and each file's
+   encode) sets, then clears, including on failure. The real call is accepted.
+   **Not verified at the OS level** (`powercfg /requests` needs admin).
+8. Version 0.4.0; README, RELEASE_NOTES, spec routes, onboarding updated.
+9. **Pending:** the user's real folder, unattended.
+
+**Decisions made while building** (MODERATE):
+
+- **Outputs are written as `<name>.part.mp4` and renamed when complete.** Otherwise a
+  crash or power cut mid-encode leaves a half file under the final name, and the resume
+  rule ("output exists, skip") would treat it as done.
+- **Non-video files are one summary line, not rows.** A folder of 300 photos shouldn't bury
+  the videos. Files that look like videos but can't be read *are* rows, greyed, with the
+  reason (the text before ffprobe's first colon; the full text is logged).
+- **Files inside Squishy's output folder are refused,** so a batch can't squish its own
+  results into `clip_medium_medium.mp4`.
+- The Choose buttons are disabled while a batch runs; the server refuses picks then anyway.
+- `safe_stem` moved from `server.py` to `trim.py` (next to `output_stem`) so `batch.py` can
+  use it without an import cycle; `server.py` re-exports it.
+
+---
+
 ## 2026-09-27 - v0.4 planned: batch (grilled)
 
 Plan and success criteria are in spec.md Sprint 5. The user asked for it after an 11 min,

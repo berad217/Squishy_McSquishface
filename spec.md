@@ -108,6 +108,12 @@ Squishy_McSquishface/
 | POST | `/api/plans` | `{file_id, in_s?, out_s?}` -> plans for the trim + the Original card (v0.3) |
 | POST | `/api/still` | `{file_id, t}` -> full-res JPEG in the output folder (v0.3) |
 | POST | `/api/still/<id>/reveal` | `explorer /select,<path>` (v0.3) |
+| POST | `/api/pick` | `{mode: folder\|files}` -> opens a Windows picker on this PC; returns the listing (rows with ceilings per preset, existing outputs, errors; other files) or `{cancelled}` (v0.4) |
+| POST | `/api/batch` | `{listing_id, preset_id, item_ids}` -> start the batch (v0.4) |
+| GET | `/api/batch` | batch status, or `{state: "none"}` (v0.4) |
+| POST | `/api/batch/stop` | stop now; partial deleted (v0.4) |
+| POST | `/api/batch/reveal` | Explorer on the first finished output (v0.4) |
+| POST | `/api/batch/dismiss` | forget a finished batch (409 while running) (v0.4) |
 
 `/api/encode` takes optional `in_s`/`out_s`, and `preset_id: "original"` (needs a trim).
 

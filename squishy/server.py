@@ -12,14 +12,17 @@ import socket
 import subprocess
 import threading
 import urllib.parse
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from . import __version__
+from .batch import Batch, Listing, build_listing
 from .encoder import NO_WINDOW, EncodeJob, build_copy_args, build_ffmpeg_args, build_frame_args
 from .presets import PRESETS_BY_ID, SourceInfo, plan_for, plans_for
+from .picker import PickerError, pick
 from .probe import ProbeError, probe_file, probe_packets
 from .trim import (
     CopyPlan,
@@ -31,6 +34,7 @@ from .trim import (
     make_trim,
     output_stem,
     parse_range,
+    safe_stem,
     snap_to_keyframe,
 )
 
@@ -38,30 +42,10 @@ log = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 CHUNK = 1024 * 1024
-WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
-                    *(f"LPT{i}" for i in range(1, 10))}
 MEDIA_TYPES = {".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime",
                ".mkv": "video/x-matroska", ".webm": "video/webm", ".avi": "video/x-msvideo",
                ".ts": "video/mp2t", ".mts": "video/mp2t", ".m2ts": "video/mp2t"}
 PREVIEW_WIDTH = 960  # fallback player frames: plenty for picking a cut point
-
-
-def safe_stem(filename: str) -> str:
-    """Turn an arbitrary uploaded filename into a safe Windows file stem.
-
-    Args:
-        filename: Name as sent by the browser (may contain anything).
-
-    Returns:
-        A non-empty stem of at most 100 chars with no path separators.
-    """
-    stem = Path(filename.replace("\\", "/").split("/")[-1]).stem
-    stem = re.sub(r"[^\w\-. ()\[\]]+", "_", stem).strip(" .")[:100]
-    if not stem:
-        stem = "video"
-    if stem.upper() in WINDOWS_RESERVED:
-        stem = f"_{stem}"
-    return stem
 
 
 def unique_path(directory: Path, stem: str, suffix: str) -> Path:
@@ -116,10 +100,22 @@ class AppState:
     ffmpeg: str = "ffmpeg"
     ffprobe: str = "ffprobe"
     lock: threading.Lock = field(default_factory=threading.Lock)
+    listing: Listing | None = None  # the latest picker result
+    batch: Batch | None = None  # running, or finished and not yet dismissed
+    picker: Callable[[str], list[Path]] = pick  # tests swap in a fake
+    pick_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def active_job(self) -> EncodeJob | None:
         """Return the running job, if any (one at a time by design)."""
         return next((j for j in self.jobs.values() if j.active), None)
+
+    def busy(self) -> str | None:
+        """Why new work has to wait, or None if it doesn't."""
+        if self.batch is not None and self.batch.active:
+            return "a batch is running; wait for it or stop it first"
+        if self.active_job() is not None:
+            return "an encode is running; wait or cancel it first"
+        return None
 
     def drop_uploads(self) -> None:
         """Delete all received source files (only called with no active job)."""
@@ -132,6 +128,9 @@ class AppState:
 
     def shutdown(self) -> None:
         """Cancel running work and remove the temp directory."""
+        if self.batch is not None and self.batch.active:
+            self.batch.stop()
+            self.batch.wait(timeout=10)
         for job in self.jobs.values():
             if job.active:
                 job.cancel()
@@ -362,6 +361,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._frame(parts[2])
         if len(parts) == 3 and parts[:2] == ["api", "keyframes"]:
             return self._keyframes(parts[2])
+        if path == "/api/batch":
+            batch = self.app.batch
+            return self._send_json(HTTPStatus.OK, batch.status() if batch else {"state": "none"})
         return self._error(HTTPStatus.NOT_FOUND, "not found")
 
     def do_POST(self) -> None:  # noqa: N802
@@ -377,6 +379,28 @@ class Handler(BaseHTTPRequestHandler):
             return self._plans()
         if path == "/api/still":
             return self._still()
+        if path == "/api/pick":
+            return self._pick()
+        if path == "/api/batch":
+            return self._batch_start()
+        if path == "/api/batch/stop":
+            batch = self.app.batch
+            if batch is None:
+                return self._error(HTTPStatus.NOT_FOUND, "no batch")
+            batch.stop()
+            return self._send_json(HTTPStatus.OK, batch.status())
+        if path == "/api/batch/reveal":
+            batch = self.app.batch
+            done = [i for i in batch.items if i.state == "done"] if batch else []
+            if not done:
+                return self._error(HTTPStatus.CONFLICT, "nothing squished yet")
+            return self._reveal(self.app.out_dir / done[0].output_name)
+        if path == "/api/batch/dismiss":
+            with self.app.lock:
+                if self.app.batch is not None and self.app.batch.active:
+                    return self._error(HTTPStatus.CONFLICT, "the batch is still running")
+                self.app.batch = None
+            return self._send_json(HTTPStatus.OK, {"state": "none"})
         if len(parts) == 4 and parts[:2] == ["api", "job"]:
             job = self._job_from_path(parts)
             if job is None:
@@ -421,13 +445,13 @@ class Handler(BaseHTTPRequestHandler):
         name = urllib.parse.unquote(self.headers.get("X-Filename") or "video")
 
         with self.app.lock:
-            busy = self.app.active_job() is not None
+            busy = self.app.busy()
             if not busy:
                 self.app.drop_uploads()
         if busy:
             if self._receive(None, length)[0] < length:
                 return None
-            return self._error(HTTPStatus.CONFLICT, "an encode is running; wait or cancel it first")
+            return self._error(HTTPStatus.CONFLICT, busy)
 
         file_id = secrets.token_hex(6)
         suffix = re.sub(r"[^\w.]", "", Path(name).suffix)[:10] or ".bin"
@@ -481,8 +505,9 @@ class Handler(BaseHTTPRequestHandler):
                 trim = self._trim_from(data, upload)
             except ValueError as exc:
                 return self._error(HTTPStatus.BAD_REQUEST, str(exc))
-            if self.app.active_job():
-                return self._error(HTTPStatus.CONFLICT, "an encode is already running")
+            busy = self.app.busy()
+            if busy:
+                return self._error(HTTPStatus.CONFLICT, busy)
 
             stem = safe_stem(upload.info.name)
             if original:
@@ -539,6 +564,75 @@ class Handler(BaseHTTPRequestHandler):
             "trim": None if trim is None else {"in_s": trim.in_s, "out_s": trim.out_s},
             "original": self._original(upload, trim),
         })
+
+    def _pick(self) -> None:
+        """Open a native picker on this machine and list what was chosen (Sprint 5).
+
+        Paths only ever come from the picker, which a person at this PC answers; the page
+        refers to files by item id. So the page can't make the server read anything else.
+        """
+        try:
+            data = self._read_json()
+        except (ValueError, json.JSONDecodeError) as exc:
+            return self._error(HTTPStatus.BAD_REQUEST, str(exc))
+        mode = data.get("mode")
+        if mode not in ("folder", "files"):
+            return self._error(HTTPStatus.BAD_REQUEST, "mode must be 'folder' or 'files'")
+        with self.app.lock:
+            busy = self.app.busy()
+        if busy:
+            return self._error(HTTPStatus.CONFLICT, busy)
+        if not self.app.pick_lock.acquire(blocking=False):
+            return self._error(HTTPStatus.CONFLICT, "a picker is already open; look for it on the taskbar")
+        try:
+            try:
+                chosen = self.app.picker(mode)
+            except PickerError as exc:
+                log.error("Picker failed: %s", exc)
+                return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            if not chosen:
+                return self._send_json(HTTPStatus.OK, {"cancelled": True})
+            folder = chosen[0] if mode == "folder" else None
+            try:
+                paths = [p for p in folder.iterdir() if p.is_file()] if folder else chosen
+            except OSError as exc:
+                log.error("Cannot read folder %s: %s", folder, exc)
+                return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, f"cannot read {folder}: {exc}")
+            listing = build_listing(paths, folder=folder, out_dir=self.app.out_dir, ffprobe=self.app.ffprobe)
+        finally:
+            self.app.pick_lock.release()
+        with self.app.lock:
+            self.app.listing = listing
+        return self._send_json(HTTPStatus.OK, listing.to_dict(self.app.out_dir))
+
+    def _batch_start(self) -> None:
+        try:
+            data = self._read_json()
+        except (ValueError, json.JSONDecodeError) as exc:
+            return self._error(HTTPStatus.BAD_REQUEST, str(exc))
+        preset = PRESETS_BY_ID.get(str(data.get("preset_id")))
+        if preset is None:
+            return self._error(HTTPStatus.BAD_REQUEST, "unknown preset")
+        ids = data.get("item_ids")
+        if not isinstance(ids, list) or not ids:
+            return self._error(HTTPStatus.BAD_REQUEST, "tick at least one file")
+        with self.app.lock:
+            listing = self.app.listing
+            if listing is None or listing.listing_id != data.get("listing_id"):
+                return self._error(HTTPStatus.CONFLICT, "that list is out of date; choose the files again")
+            wanted = {str(i) for i in ids}
+            items = [i for i in listing.items if i.item_id in wanted]
+            if len(items) != len(wanted):
+                return self._error(HTTPStatus.BAD_REQUEST, "a ticked file isn't in the list")
+            if any(i.error for i in items):
+                return self._error(HTTPStatus.BAD_REQUEST, "a ticked file can't be squished")
+            busy = self.app.busy()
+            if busy:
+                return self._error(HTTPStatus.CONFLICT, busy)
+            batch = Batch(secrets.token_hex(4), items, preset, self.app.out_dir, ffmpeg=self.app.ffmpeg)
+            self.app.batch = batch
+            batch.start()
+        return self._send_json(HTTPStatus.OK, batch.status())
 
     def _still(self) -> None:
         try:

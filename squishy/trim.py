@@ -9,6 +9,7 @@ import math
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from pathlib import PurePath
 
 MIN_TRIM_S = 0.1  # shorter than this is a slip of the mouse, not a clip
 UNTOUCHED_S = 0.001  # in/out this close to the ends counts as not trimmed
@@ -90,6 +91,28 @@ def fmt_stamp(seconds: float) -> str:
     if h:
         return f"{h}h{m:02d}m{s}"
     return f"{m}m{s}" if m else s
+
+
+WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
+                    *(f"LPT{i}" for i in range(1, 10))}
+
+
+def safe_stem(filename: str) -> str:
+    """Turn an arbitrary filename into a safe Windows file stem.
+
+    Args:
+        filename: Name as sent by the browser or found on disk (may contain anything).
+
+    Returns:
+        A non-empty stem of at most 100 chars with no path separators.
+    """
+    stem = PurePath(filename.replace("\\", "/").split("/")[-1]).stem
+    stem = re.sub(r"[^\w\-. ()\[\]]+", "_", stem).strip(" .")[:100]
+    if not stem:
+        stem = "video"
+    if stem.upper() in WINDOWS_RESERVED:
+        stem = f"_{stem}"
+    return stem
 
 
 def output_stem(stem: str, label: str, trim: Trim | None) -> str:

@@ -1,7 +1,8 @@
 # Squishy McSquishface
 
 Drop a video in, pick how hard to squish it, get a smaller MP4. Optionally trim it to just
-the part you want first, or save a single frame as a picture.
+the part you want first, or save a single frame as a picture. Or point it at a whole
+folder and let it work through them while you're away.
 
 Squishy runs on your own computer: it's a tiny local web page driven by ffmpeg. Nothing is
 uploaded anywhere. Before you encode, it shows the **largest** file each compression level can
@@ -42,6 +43,12 @@ Squishy offers to download it the first time you run it.
      (see below). Ctrl+arrows jump between them. If the Original would start early,
      **Start on keyframe** moves your start back to it, so every card starts on the same frame.
    - **Save frame** saves the frame you're looking at as a full-size JPEG.
+   - **Got a pile of videos?** Click **Choose folder...** (or **Choose files...**), untick any
+     you don't want, pick a level, and click **Squish**. Squishy does them one at a time
+     while you do something else, and your PC won't go to sleep halfway. You can close the
+     browser tab; reopen Squishy's page to check on it. Batches squish whole videos (no
+     trimming). Stopped partway? Choose the same folder again: videos already done are
+     skipped.
 5. Your files go to **`Videos\Squished`**. Click **Open folder** to jump there. Trimmed clips
    and frames have their time range in the name, e.g. `clip_medium_5.200s-12.800s.mp4`.
 
@@ -63,6 +70,11 @@ says so and stops, rather than quietly opening the old version.
   changes). The card says how early: under a second for many cameras, but some recordings
   (phone and chat-app videos, for example) have keyframes several seconds apart. The squish
   levels start exactly where you set. Click **Start on keyframe** to make them all match.
+- **A batch "skipped" a video.** Either it was already squished at that level (its file is in
+  `Videos\Squished`), or squishing it didn't make it any smaller, so Squishy threw the
+  result away rather than hand you a bigger file.
+- **The folder picker doesn't appear.** It opens on the PC Squishy runs on and can take a
+  second or two. If it's hiding, look for it on the taskbar.
 - **The preview is a still picture with no sound, and Play is greyed out.** Your browser
   can't play that kind of video, so Squishy shows frames from ffmpeg instead. Trimming and
   Save frame still work.
@@ -102,7 +114,11 @@ one, and ask the human before installing anything system-wide.
 Constraints, so you don't "fix" the wrong thing:
 
 - **Localhost only.** Don't bind it to `0.0.0.0` or expose it on the network. The server rejects
-  other Host headers and cross-origin POSTs on purpose.
+  other Host headers and cross-origin POSTs on purpose. Batches read files where they are,
+  chosen in a Windows picker that the server opens on this PC, which is only safe because
+  nobody else can reach the server.
+- **Batches need tkinter** (included with the python.org installer by default). Without it,
+  single videos still work and the picker says what's missing.
 - **The size estimates are ceilings on purpose.** Don't tune them down to match actual outputs.
 - **Run `--get-ffmpeg` before launching from a non-interactive shell.** If ffmpeg is missing,
   a plain launch prompts, reads EOF, treats that as "no", and exits 1. It won't hang.

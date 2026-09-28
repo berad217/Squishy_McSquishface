@@ -11,6 +11,7 @@ import threading
 import time
 from pathlib import Path
 
+from .awake import keep_awake
 from .presets import Plan
 from .trim import SEEK_SLACK_S, CopyPlan, Trim
 
@@ -322,6 +323,10 @@ class EncodeJob:
             log.warning("Could not delete partial output %s: %s", self.dst, exc)
 
     def _run(self) -> None:
+        with keep_awake():  # an unattended encode shouldn't be cut short by sleep
+            self._encode()
+
+    def _encode(self) -> None:
         args = self.args or build_ffmpeg_args(self.src, self.dst, self.plan, self.ffmpeg)
         log.info("Job %s start: %s -> %s", self.job_id, self.plan.preset_id, self.dst.name)
         self.started_at = time.monotonic()

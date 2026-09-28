@@ -99,6 +99,24 @@
   .status.ok { border-left: 4px solid var(--ok); }
   .status.err { border-left: 4px solid var(--err); }
   .status .errtext { color: var(--err); white-space: pre-wrap; font-family: ui-monospace, Consolas, monospace; font-size: 12px; margin-top: 8px; }
+  .pickrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+  .pickrow button { padding: 6px 12px; }
+  .tablewrap { overflow-x: auto; margin-top: 16px; }
+  table.files { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.files th { text-align: left; color: var(--muted); font-weight: 500; font-size: 13px; padding: 6px 8px;
+    border-bottom: 1px solid var(--line); }
+  table.files td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.files .name { word-break: break-all; }
+  table.files .r { text-align: right; white-space: nowrap; }
+  table.files tr.off td { color: var(--muted); }
+  table.files .note { font-size: 13px; color: var(--muted); }
+  table.files .note.err { color: var(--err); }
+  table.files .note.ok { color: var(--ok); }
+  table.files input { margin: 3px 0 0; }
+  .rowbar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; margin-top: 5px; max-width: 160px; }
+  .rowbar > div { height: 100%; background: var(--accent); }
+  .actions .grow { flex: 1; min-width: 180px; }
+  .actions .grow .bar { margin: 0 0 4px; }
   footer { color: var(--muted); font-size: 13px; margin-top: 36px; }
   footer code { color: var(--text); }
 </style>
@@ -112,6 +130,11 @@
     <div class="big" id="dropBig">Drop a video here</div>
     <div class="hint" id="dropHint">or click to choose a file</div>
     <input type="file" id="picker" accept="video/*" hidden>
+  </div>
+  <div class="pickrow">
+    <button type="button" id="pickFolder">Choose folder...</button>
+    <button type="button" id="pickFiles">Choose files...</button>
+    <span class="meta" id="pickHint"></span>
   </div>
 
   <section id="uploading" class="panel hidden">
@@ -171,6 +194,29 @@
     </div>
   </section>
 
+  <section id="batchView" class="panel hidden">
+    <div class="source" id="batchSource"></div>
+    <div class="cards" id="batchCards"></div>
+    <div class="tablewrap">
+      <table class="files">
+        <thead><tr id="batchHead"></tr></thead>
+        <tbody id="batchRows"></tbody>
+      </table>
+    </div>
+    <div class="meta" id="batchOthers" style="font-size:13px;margin-top:8px"></div>
+    <div class="status hidden" id="batchSummary"></div>
+    <div class="actions sticky">
+      <button class="primary" id="batchGo" type="button">Squish</button>
+      <button id="batchStop" type="button" class="hidden">Stop</button>
+      <button class="primary hidden" id="batchReveal" type="button">Open folder</button>
+      <button id="batchClose" type="button" class="hidden">Done</button>
+      <div class="grow">
+        <div class="bar hidden" id="batchBarWrap"><div id="batchBar"></div></div>
+        <span class="meta num" id="batchHint"></span>
+      </div>
+    </div>
+  </section>
+
   <footer>
     Sizes are ceilings: the result lands at or under the estimate. MB here = what Windows Explorer shows.<br>
     Output folder: <code id="outDir">-</code> &middot; Close the Squishy console window to quit.
@@ -198,7 +244,8 @@
     if (text !== undefined) e.textContent = text;
     return e;
   };
-  const busy = () => state.job && ["queued", "running"].includes(state.job.state);
+  const batchBusy = () => !!state.batch && state.batch.state === "running";
+  const busy = () => (state.job && ["queued", "running"].includes(state.job.state)) || batchBusy();
 
   // ---- drop / pick -------------------------------------------------------
   const drop = $("drop");
@@ -224,6 +271,10 @@
   });
 
   function upload(file) {
+    if (batchBusy()) {
+      $("batchHint").textContent = "A batch is running. Wait for it, or stop it, before squishing a single video.";
+      return;
+    }
     if (busy()) return showStatus("err", "An encode is running", "Wait for it to finish or cancel it first.");
     // A new drop replaces an upload still in flight. Left running, whichever finished
     // last would win, and it could reset the page under a job started from the other.
@@ -313,6 +364,7 @@
       el("span", "", s.has_audio ? "with audio" : "no audio"));
 
     $("status").classList.add("hidden");
+    $("batchView").classList.add("hidden");
     $("loaded").classList.remove("hidden");
     loadPlayer(s);
     renderCards();
@@ -727,6 +779,277 @@
     open.addEventListener("click", () => api("POST", `/api/still/${res.data.still_id}/reveal`));
     msg.append(el("span", "num", `Saved ${res.data.name} (${fmtMB(res.data.bytes)} MB)`), open);
   });
+
+  // ---- batch -------------------------------------------------------------
+  // One preset over many whole files, read where they are. The server opens the picker (a
+  // normal Windows dialog) and runs the batch, so closing this tab doesn't stop it.
+  const GIB = 1024 * MIB;
+  const sizeParts = (b) => (b >= GIB ? [(b / GIB).toFixed(1), "GB"] : [fmtMB(b), "MB"]);
+  const fmtSize = (b) => sizeParts(b).join(" ");
+  const PICK_HINT = "Squish a whole folder, or several videos, while you do something else.";
+  $("pickHint").textContent = PICK_HINT;
+
+  function setPickButtons(on) {
+    $("pickFolder").disabled = $("pickFiles").disabled = !on;
+  }
+
+  async function pickBatch(mode) {
+    if (busy()) return;
+    const hint = $("pickHint");
+    setPickButtons(false);
+    hint.style.color = "";
+    hint.textContent = "Opening the picker (it can take a second or two)...";
+    const res = await api("POST", "/api/pick", { mode });
+    setPickButtons(true);
+    hint.textContent = PICK_HINT;
+    if (!res.ok) {
+      hint.style.color = "var(--err)";
+      hint.textContent = `Couldn't open the picker: ${res.data.error}`;
+      return;
+    }
+    if (res.data.cancelled) return;
+    state.listing = res.data;
+    state.batch = null;
+    $("outDir").textContent = res.data.out_dir;
+    state.ticks = new Set(res.data.items.filter((i) => !i.error).map((i) => i.item_id));
+    state.batchPreset = state.batchPreset || "medium";
+    enterBatchView();
+  }
+  $("pickFolder").addEventListener("click", () => pickBatch("folder"));
+  $("pickFiles").addEventListener("click", () => pickBatch("files"));
+
+  function enterBatchView() {
+    if (state.source) video.pause();
+    state.source = null; // the single-file player is gone; its keys shouldn't act
+    $("loaded").classList.add("hidden");
+    $("uploading").classList.add("hidden");
+    drop.classList.add("compact");
+    $("dropBig").textContent = "Drop a single video";
+    $("dropHint").textContent = "or click to choose one";
+    $("batchView").classList.remove("hidden");
+    renderBatch();
+  }
+
+  function leaveBatchView() {
+    clearInterval(state.batchPoll);
+    setPickButtons(true);
+    state.batch = null;
+    state.listing = null;
+    $("batchView").classList.add("hidden");
+    drop.classList.remove("compact");
+    $("dropBig").textContent = "Drop a video here";
+    $("dropHint").textContent = "or click to choose a file";
+  }
+
+  function td(cls, content) {
+    const c = el("td", cls);
+    if (content instanceof Node) c.append(content);
+    else if (content !== undefined && content !== null) c.textContent = content;
+    return c;
+  }
+  function setHead(cells) {
+    $("batchHead").replaceChildren(...cells.map(([text, cls]) => {
+      const th = el("th", cls || "");
+      if (text instanceof Node) th.append(text); else th.textContent = text;
+      return th;
+    }));
+  }
+
+  function renderBatch() {
+    if (state.batch) return renderBatchRun(state.batch);
+    const L = state.listing;
+    if (!L) return;
+    const usable = L.items.filter((i) => !i.error);
+    const ticked = usable.filter((i) => state.ticks.has(i.item_id));
+    const size = ticked.reduce((s, i) => s + i.size_bytes, 0);
+    const len = ticked.reduce((s, i) => s + i.duration_s, 0);
+    const pid = state.batchPreset;
+
+    $("batchSource").replaceChildren(
+      el("strong", "", L.folder || `${L.items.length + L.others.length} files chosen`),
+      el("span", "num", `${ticked.length} of ${usable.length} videos ticked`),
+      el("span", "num", fmtSize(size)), el("span", "num", fmtTime(len)));
+
+    const cards = $("batchCards");
+    cards.classList.remove("hidden");
+    cards.replaceChildren(...L.presets.map((p) => {
+      const total = ticked.reduce((s, i) => s + (i.ceilings[p.id] || 0), 0);
+      const already = ticked.filter((i) => i.existing.includes(p.id)).length;
+      const c = el("button", "card" + (p.id === pid ? " selected" : ""));
+      c.type = "button";
+      c.addEventListener("click", () => { state.batchPreset = p.id; renderBatch(); });
+      const [n, unit] = sizeParts(total);
+      const sz = el("div", "size num");
+      sz.append(el("small", "", "up to "), document.createTextNode(n + " "), el("small", "", unit));
+      const pct = size ? Math.round((100 * total) / size) : 0;
+      const spec = el("div", "spec num");
+      spec.append(el("div", "", `up to ${p.max_short_side}p, ${p.max_fps} fps`), el("div", "", `${p.video_kbps / 1000} Mbps video`));
+      c.append(el("div", "label", p.label), sz, el("div", "ratio num", `~${pct}% of ${fmtSize(size)}`), spec);
+      if (already) c.append(el("div", "warn num", `${already} already squished; skipped`));
+      return c;
+    }));
+
+    // Header tick box: all / none, showing "some" as indeterminate.
+    const all = el("input");
+    all.type = "checkbox";
+    all.title = "Tick all / none";
+    all.checked = ticked.length === usable.length && usable.length > 0;
+    all.indeterminate = ticked.length > 0 && ticked.length < usable.length;
+    all.addEventListener("change", () => {
+      state.ticks = new Set(all.checked ? usable.map((i) => i.item_id) : []);
+      renderBatch();
+    });
+    setHead([[all], ["Video"], ["Length", "r"], ["Size", "r"], ["Up to", "r"], [""]]);
+
+    const focusId = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.id : null;
+    const rows = $("batchRows");
+    rows.replaceChildren(...L.items.map((i) => {
+      const tr = el("tr", i.error ? "off" : "");
+      const cb = el("input");
+      cb.type = "checkbox";
+      cb.dataset.id = i.item_id;
+      cb.disabled = !!i.error;
+      cb.checked = state.ticks.has(i.item_id);
+      cb.addEventListener("change", () => {
+        if (cb.checked) state.ticks.add(i.item_id); else state.ticks.delete(i.item_id);
+        renderBatch();
+      });
+      let note = null;
+      if (i.error) note = el("span", "note", `Can't squish: ${i.error}`);
+      else if (i.existing.includes(pid)) note = el("span", "note", "Already squished; will be skipped");
+      tr.append(td("", cb), td("name", i.name), td("r num", i.duration_s ? fmtTime(i.duration_s) : ""),
+        td("r num", i.size_bytes ? fmtSize(i.size_bytes) : ""),
+        td("r num", i.ceilings[pid] ? fmtSize(i.ceilings[pid]) : ""), td("", note));
+      return tr;
+    }));
+    if (focusId) { const again = rows.querySelector(`[data-id="${focusId}"]`); if (again) again.focus(); }
+
+    const others = L.others;
+    $("batchOthers").textContent = others.length
+      ? `Not videos, left out: ${others.slice(0, 8).join(", ")}${others.length > 8 ? ` and ${others.length - 8} more` : ""}`
+      : "";
+    $("batchSummary").classList.add("hidden");
+    const go = $("batchGo");
+    go.classList.remove("hidden");
+    go.disabled = !ticked.length || busy();
+    go.textContent = `Squish ${ticked.length} video${ticked.length === 1 ? "" : "s"}`;
+    $("batchStop").classList.add("hidden");
+    $("batchReveal").classList.add("hidden");
+    $("batchClose").classList.add("hidden");
+    $("batchBarWrap").classList.add("hidden");
+    $("batchHint").textContent = `One at a time, whole videos. Saved to ${L.out_dir}`;
+  }
+
+  function resultNote(i) {
+    if (i.state === "running") {
+      const box = el("div");
+      const bar = el("div", "rowbar"), fill = el("div");
+      fill.style.width = `${i.percent}%`;
+      bar.append(fill);
+      box.append(el("span", "note num", `Squishing... ${i.percent.toFixed(0)}%`), bar);
+      return box;
+    }
+    if (i.state === "done") {
+      const pct = Math.round(100 * (1 - i.output_bytes / i.size_bytes));
+      return el("span", "note ok num", `${fmtSize(i.output_bytes)}, ${pct}% smaller`);
+    }
+    if (i.state === "skipped") return el("span", "note", `Skipped: ${i.reason}`);
+    if (i.state === "failed") return el("span", "note err", `Failed: ${i.reason}`);
+    if (i.state === "stopped") return el("span", "note", "Stopped; partial file deleted");
+    return el("span", "note", i.state === "not_started" ? "Not started" : "Waiting");
+  }
+
+  function renderBatchRun(b) {
+    const n = b.items.length;
+    const running = b.state === "running";
+    setPickButtons(!running);
+    const verb = running ? "Squishing" : b.state === "stopped" ? "Stopped squishing" : "Squished";
+    $("batchSource").replaceChildren(el("strong", "", `${verb} ${n} video${n === 1 ? "" : "s"} on ${b.label}`),
+      el("span", "", `Saved to ${b.out_dir}`));
+    $("batchCards").classList.add("hidden");
+    $("batchOthers").textContent = "";
+    setHead([["Video"], ["Size", "r"], ["Result"]]);
+    $("batchRows").replaceChildren(...b.items.map((i) => {
+      const tr = el("tr");
+      tr.append(td("name", i.name), td("r num", i.size_bytes ? fmtSize(i.size_bytes) : ""), td("", resultNote(i)));
+      return tr;
+    }));
+
+    const finished = b.items.filter((i) => !["waiting", "running"].includes(i.state)).length;
+    const cur = b.items.find((i) => i.state === "running");
+    const frac = (finished + (cur ? cur.percent / 100 : 0)) / n;
+    $("batchBar").style.width = `${(100 * frac).toFixed(1)}%`;
+    $("batchBarWrap").classList.toggle("hidden", !running);
+    $("batchGo").classList.add("hidden");
+    $("batchStop").classList.toggle("hidden", !running);
+    $("batchReveal").classList.toggle("hidden", running || !(b.counts.done > 0));
+    $("batchClose").classList.toggle("hidden", running);
+    const left = b.eta_s === null ? "working out the time left..." : `about ${fmtTime(b.eta_s)} left`;
+    $("batchHint").textContent = running ? `${finished} of ${n} done · ${left}` : "";
+
+    const box = $("batchSummary");
+    if (running) { box.classList.add("hidden"); return; }
+    const c = b.counts, parts = [];
+    if (c.done) parts.push(`${c.done} squished`);
+    if (c.skipped) parts.push(`${c.skipped} skipped`);
+    if (c.failed) parts.push(`${c.failed} failed`);
+    if (c.stopped || c.not_started) parts.push(`${(c.stopped || 0) + (c.not_started || 0)} not done`);
+    box.className = "status " + (c.failed ? "err" : "ok");
+    const head = c.done ? `${fmtSize(b.bytes_before)} -> ${fmtSize(b.bytes_after)}`
+      : b.state === "stopped" ? "Stopped" : "Nothing new squished";
+    box.replaceChildren(el("div", "headline num", head),
+      el("div", "meta num", `${parts.join(" · ")} · took ${fmtTime(b.elapsed_s)}`
+        + (b.state === "stopped" ? " · choose the same folder again to carry on" : "")));
+  }
+
+  $("batchGo").addEventListener("click", async () => {
+    const L = state.listing;
+    if (!L || busy()) return;
+    const ids = L.items.filter((i) => !i.error && state.ticks.has(i.item_id)).map((i) => i.item_id);
+    const res = await api("POST", "/api/batch", { listing_id: L.listing_id, preset_id: state.batchPreset, item_ids: ids });
+    if (!res.ok) { $("batchHint").textContent = `Couldn't start: ${res.data.error}`; return; }
+    state.batch = res.data;
+    renderBatch();
+    state.batchPoll = setInterval(pollBatch, 1000);
+  });
+  $("batchStop").addEventListener("click", async () => {
+    $("batchStop").disabled = true;
+    await api("POST", "/api/batch/stop");
+    $("batchStop").disabled = false;
+    pollBatch();
+  });
+  $("batchReveal").addEventListener("click", () => api("POST", "/api/batch/reveal"));
+  $("batchClose").addEventListener("click", async () => {
+    await api("POST", "/api/batch/dismiss");
+    leaveBatchView();
+  });
+
+  async function pollBatch() {
+    const res = await api("GET", "/api/batch");
+    if (!res.ok) {
+      state.pollFails += 1;
+      if (res.status === 0 && state.pollFails < POLL_RETRIES) return;
+      clearInterval(state.batchPoll);
+      state.pollFails = 0;
+      state.batch = null;
+      $("batchHint").textContent = `Lost track of the batch: ${res.data.error}`;
+      return;
+    }
+    state.pollFails = 0;
+    if (res.data.state === "none") return leaveBatchView();
+    state.batch = res.data;
+    if (state.batch.state !== "running") clearInterval(state.batchPoll);
+    renderBatch();
+  }
+
+  // A batch outlives the tab: reopening the page picks it up (and its summary) again.
+  (async () => {
+    const res = await api("GET", "/api/batch");
+    if (!res.ok || res.data.state === "none" || state.source) return;
+    state.batch = res.data;
+    enterBatchView();
+    if (batchBusy()) state.batchPoll = setInterval(pollBatch, 1000);
+  })();
 
   // ---- encode ------------------------------------------------------------
   $("go").addEventListener("click", async () => {

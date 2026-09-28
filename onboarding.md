@@ -17,7 +17,10 @@ Python stdlib + ffmpeg. Single user, Windows, localhost only.
 | `squishy/presets.py` | **The knobs.** Preset table + size-ceiling math. Pure. |
 | `squishy/probe.py` | ffprobe JSON -> `SourceInfo` (handles rotation, missing bitrates) |
 | `squishy/encoder.py` | ffmpeg argv builders (encode, trimmed encode, Original copy, frame), progress parser, `EncodeJob` thread |
-| `squishy/trim.py` | Trims, keyframe snap, output names, HTTP Range parsing, packet parsing. Pure. |
+| `squishy/trim.py` | Trims, keyframe snap, output names (`safe_stem`), HTTP Range parsing, packet parsing. Pure. |
+| `squishy/batch.py` | Batches: file sorting, names, time left (pure); listing (probes in parallel); the `Batch` runner |
+| `squishy/picker.py` | Native Windows pickers: tkinter in a child Python |
+| `squishy/awake.py` | Keep Windows from sleeping during any encode |
 | `squishy/server.py` | HTTP routes (table in spec.md section 5) |
 | `squishy/workdir.py` | Per-instance temp folder + lock; startup sweeps only dead instances' folders |
 | `squishy/static/index.html` | Whole UI: inline CSS + vanilla JS, no build step |
@@ -55,5 +58,11 @@ python launch.py --no-browser --out <scratch dir>
   fires while the page is painting: in a hidden browser pane the time display freezes.
   Test headless logic with `seeked` + `drawImage`, not rVFC. The keyframe snap allows the
   same 2 ms, so a start set on a keyframe from a slightly-low player time stays on it.
+- **Batch paths come only from the picker.** The page refers to files by item id, never by
+  path, so it can't make the server read anything a person didn't pick. Keep it that way,
+  and keep the server localhost-only.
+- **Batch outputs are written as `<name>.part.mp4` and renamed when complete,** so "the
+  output exists" means finished (resume skips it). Don't "simplify" to writing in place.
+- **Tests never open a real picker:** they set `AppState.picker` to a fake.
 - **Packet times are relative to the file's `start_time`,** the timeline `-ss` uses.
   ffprobe prints absolute ones; they differ for files that don't start at 0 (MPEG-TS).
